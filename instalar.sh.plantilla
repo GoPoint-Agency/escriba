@@ -1,0 +1,58 @@
+#!/bin/bash
+# Instalador de Escriba. Uso: pegar en Terminal
+#   curl -fsSL https://gopointagency.com/escriba/instalar.sh | bash
+# Baja la app, revisa que llegó entera, la copia a Aplicaciones y la abre.
+set -euo pipefail
+VERSION="__VERSION__"
+URL="${ESCRIBA_URL:-https://gopointagency.com/escriba/Escriba-__VERSION__.zip}"
+SHA="__SHA__"
+
+fallo() { echo ""; echo "No se pudo instalar: $1"; exit 1; }
+
+echo ""
+echo "Instalando Escriba..."
+
+[ "$(uname -s)" = "Darwin" ] || fallo "Escriba solo funciona en Mac."
+MAYOR=$(sw_vers -productVersion | cut -d. -f1)
+[ "$MAYOR" -ge 13 ] || fallo "este Mac tiene macOS $(sw_vers -productVersion) y Escriba necesita macOS 13 (Ventura) o más nuevo. Actualiza en Ajustes del Sistema > General > Actualización de software."
+
+# Si ya está instalada se actualiza en el mismo lugar; si no, va a Aplicaciones.
+if [ -n "${ESCRIBA_DESTINO:-}" ]; then DEST="$ESCRIBA_DESTINO"
+elif [ -d "$HOME/Applications/Escriba.app" ]; then DEST="$HOME/Applications"
+elif [ -w /Applications ]; then DEST="/Applications"
+else DEST="$HOME/Applications"; fi
+mkdir -p "$DEST"
+APP="$DEST/Escriba.app"
+
+# No interrumpir una grabación en curso.
+SES="$HOME/Library/Application Support/Escriba/sesiones"
+if pgrep -xq Escriba && [ -d "$SES" ] && [ -n "$(find "$SES" -type f -mmin -2 2>/dev/null | head -1)" ]; then
+  fallo "Escriba está grabando una reunión. Detén la grabación y pega la línea de nuevo."
+fi
+
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+echo "1 de 3: descargando (3 MB)"
+curl -fL --progress-bar "$URL" -o "$TMP/Escriba.zip" || fallo "falló la descarga. Revisa internet y pega la línea de nuevo."
+[ "$(shasum -a 256 "$TMP/Escriba.zip" | cut -d' ' -f1)" = "$SHA" ] || fallo "la descarga llegó dañada. Pega la línea de nuevo."
+
+echo "2 de 3: copiando a $DEST"
+ditto -x -k "$TMP/Escriba.zip" "$TMP/app"
+[ -d "$TMP/app/Escriba.app" ] || fallo "el archivo descargado no trae la app."
+if [ -z "${ESCRIBA_DESTINO:-}" ] && pgrep -xq Escriba; then
+  osascript -e 'tell application id "com.gopoint.escriba" to quit' >/dev/null 2>&1 || true
+  for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -xq Escriba || break; sleep 0.5; done
+  pkill -x Escriba 2>/dev/null || true
+fi
+[ ! -e "$APP" ] || rm -rf "$APP"
+ditto "$TMP/app/Escriba.app" "$APP"
+xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
+
+echo "3 de 3: abriendo Escriba"
+[ -n "${ESCRIBA_NO_ABRIR:-}" ] || open "$APP"
+
+echo ""
+echo "Listo. Escriba (versión $VERSION) quedó instalada."
+echo "Busca el ícono de Escriba arriba a la derecha, en la barra de menú."
+echo "La primera vez te pide tu nombre y tres permisos: micrófono, accesibilidad y grabación de pantalla."
+echo ""

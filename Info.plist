@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key><string>com.gopoint.escriba</string>
+    <key>CFBundleName</key><string>Escriba</string>
+    <key>CFBundleDisplayName</key><string>Escriba</string>
+    <key>CFBundleExecutable</key><string>Escriba</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>LSMinimumSystemVersion</key><string>13.0</string>
+    <key>LSUIElement</key><true/>
+    <key>NSMicrophoneUsageDescription</key><string>Escriba usa el micrófono para grabar tus reuniones y para el dictado.</string>
+    <key>NSAudioCaptureUsageDescription</key><string>Escriba graba el audio de tus reuniones para transcribirlas.</string>
+    <key>NSHighResolutionCapable</key><true/>
+</dict>
+</plist>

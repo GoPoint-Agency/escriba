@@ -1,0 +1,31 @@
+CÓMO INSTALAR ESCRIBA
+
+Escriba graba tus reuniones online, las transcribe y te deja un documento con todo lo que se dijo. También sirve para dictar: mantienes apretada una tecla, hablas y el texto aparece donde estés escribiendo.
+
+1. Arrastra el ícono de Escriba a la carpeta Aplicaciones (en esta misma ventana).
+
+2. Abre Escriba desde Aplicaciones. La primera vez, el Mac va a avisar que no puede comprobar quién la hizo. Es normal: la app no pasa por la tienda de Apple. Para abrirla:
+   • Toca "Listo" (o "OK") en ese aviso.
+   • Abre Ajustes del Sistema > Privacidad y seguridad.
+   • Baja hasta el final. Junto a "Escriba" toca "Abrir igualmente" y escribe la contraseña del Mac.
+   (En macOS 13 o 14 también sirve: clic derecho sobre Escriba > Abrir > Abrir.)
+
+3. Se abre la pantalla de bienvenida:
+   • Escribe tu nombre.
+   • Elige "Whisper en este Mac" para transcribir gratis. Descarga unos 550 MB una sola vez; espera a que llegue al 100 %.
+   • La clave de OpenAI es opcional. Si la pones, cada reunión trae además un resumen, los acuerdos, las tareas y los nombres de quienes hablaron.
+
+4. El Mac va a pedir tres permisos. Acepta los tres:
+   • Micrófono: para escucharte.
+   • Accesibilidad: para escribir lo que dictas.
+   • Grabación de pantalla y audio del sistema: para escuchar a los demás en la reunión. Escriba no guarda imágenes de la pantalla, solo el sonido.
+   Si después de dar un permiso algo no funciona, cierra Escriba (ícono de onda arriba a la derecha > Salir) y ábrela de nuevo.
+
+CÓMO SE USA
+
+• Arriba a la derecha, junto al reloj, aparece un ícono de onda. Ese es el menú de Escriba.
+• Reunión: en ese menú toca "Grabar reunión". Al terminar, toca "Detener y transcribir reunión". Te llega un aviso cuando el documento está listo.
+• Los documentos quedan en Documentos > Reuniones, una carpeta por reunión con la fecha y la hora. Si tienes Google Drive para escritorio instalado, quedan en tu Drive, en la carpeta Reuniones.
+• Dictar: mantén apretada la tecla ⌥ (opción) de la DERECHA, habla y suéltala. El texto aparece donde estaba el cursor.
+• Para cambiar el nombre, el modo o la clave: menú de Escriba > Ajustes.
+• Para que se abra sola al prender el Mac: menú de Escriba > Abrir al iniciar sesión.

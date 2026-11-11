@@ -1,0 +1,11 @@
+# Compilados y paquetes
+build/
+dist/
+# Firma local y certificados: nunca al repositorio
+certs/
+.firma.local
+*.p12
+*.pem
+# Instaladores de terceros que se bajan aparte
+vendor/*.pkg
+.DS_Store
