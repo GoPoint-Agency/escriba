@@ -125,6 +125,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
             tr.isEnabled = false
             m.addItem(tr)
         }
+        // La traducción de llamadas se mudó a la app Intérprete: quien actualiza la busca aquí.
+        let inter = NSMenuItem(title: "Traducir llamadas: app Intérprete…", action: #selector(openInterprete), keyEquivalent: "")
+        inter.target = self
+        m.addItem(inter)
         m.addItem(.separator())
         let out = Config.outputFolder()
         m.addItem(withTitle: out.isDrive ? "Abrir carpeta en Google Drive" : "Abrir carpeta de reuniones (local)",
@@ -212,6 +216,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     }
 
     // MARK: Dictado traducido
+
+    /// Abre Intérprete si está instalada; si no, la página para instalarla.
+    @objc private func openInterprete() {
+        if let u = NSWorkspace.shared.urlForApplication(withBundleIdentifier: LiveCapture.interpreterBundleID) {
+            NSWorkspace.shared.openApplication(at: u, configuration: NSWorkspace.OpenConfiguration())
+        } else if let web = URL(string: "https://gopointagency.com/interprete") {
+            NSWorkspace.shared.open(web)
+        }
+    }
 
     @objc private func setDictationLanguage(_ sender: NSMenuItem) {
         try? Config.update(["dictado_idioma": Config.dictationLanguages[sender.tag].code])

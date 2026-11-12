@@ -1,58 +1,55 @@
 #!/bin/bash
-# Instalador de Escriba. Uso: pegar en Terminal
-#   curl -fsSL https://gopointagency.com/escriba/instalar.sh | bash
+# Instalador de __NOMBRE__. Uso: pegar en Terminal
+#   curl -fsSL https://gopointagency.com/__RUTA__/instalar.sh | bash
 # Baja la app, revisa que llegó entera, la copia a Aplicaciones y la abre.
 set -euo pipefail
 VERSION="__VERSION__"
-URL="${ESCRIBA_URL:-https://gopointagency.com/escriba/Escriba-__VERSION__.zip}"
+URL="${ESCRIBA_URL:-https://gopointagency.com/__RUTA__/__APP__-__VERSION__.zip}"
 SHA="__SHA__"
 
 fallo() { echo ""; echo "No se pudo instalar: $1"; exit 1; }
 
 echo ""
-echo "Instalando Escriba..."
+echo "Instalando __NOMBRE__..."
 
-[ "$(uname -s)" = "Darwin" ] || fallo "Escriba solo funciona en Mac."
+[ "$(uname -s)" = "Darwin" ] || fallo "__NOMBRE__ solo funciona en Mac."
 MAYOR=$(sw_vers -productVersion | cut -d. -f1)
-[ "$MAYOR" -ge 13 ] || fallo "este Mac tiene macOS $(sw_vers -productVersion) y Escriba necesita macOS 13 (Ventura) o más nuevo. Actualiza en Ajustes del Sistema > General > Actualización de software."
+[ "$MAYOR" -ge 13 ] || fallo "este Mac tiene macOS $(sw_vers -productVersion) y __NOMBRE__ necesita macOS 13 (Ventura) o más nuevo. Actualiza en Ajustes del Sistema > General > Actualización de software."
 
 # Si ya está instalada se actualiza en el mismo lugar; si no, va a Aplicaciones.
 if [ -n "${ESCRIBA_DESTINO:-}" ]; then DEST="$ESCRIBA_DESTINO"
-elif [ -d "$HOME/Applications/Escriba.app" ]; then DEST="$HOME/Applications"
+elif [ -d "$HOME/Applications/__APP__.app" ]; then DEST="$HOME/Applications"
 elif [ -w /Applications ]; then DEST="/Applications"
 else DEST="$HOME/Applications"; fi
 mkdir -p "$DEST"
-APP="$DEST/Escriba.app"
+APP="$DEST/__APP__.app"
 
-# No interrumpir una grabación en curso.
-SES="$HOME/Library/Application Support/Escriba/sesiones"
-if pgrep -xq Escriba && [ -d "$SES" ] && [ -n "$(find "$SES" -type f -mmin -2 2>/dev/null | head -1)" ]; then
-  fallo "Escriba está grabando una reunión. Detén la grabación y pega la línea de nuevo."
-fi
+# No interrumpir lo que esté en curso.
+__EN_USO__
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-echo "1 de 3: descargando (3 MB)"
-curl -fL --progress-bar "$URL" -o "$TMP/Escriba.zip" || fallo "falló la descarga. Revisa internet y pega la línea de nuevo."
-[ "$(shasum -a 256 "$TMP/Escriba.zip" | cut -d' ' -f1)" = "$SHA" ] || fallo "la descarga llegó dañada. Pega la línea de nuevo."
+echo "1 de 3: descargando (__TAMANO__ MB)"
+curl -fL --progress-bar "$URL" -o "$TMP/app.zip" || fallo "falló la descarga. Revisa internet y pega la línea de nuevo."
+[ "$(shasum -a 256 "$TMP/app.zip" | cut -d' ' -f1)" = "$SHA" ] || fallo "la descarga llegó dañada. Pega la línea de nuevo."
 
 echo "2 de 3: copiando a $DEST"
-ditto -x -k "$TMP/Escriba.zip" "$TMP/app"
-[ -d "$TMP/app/Escriba.app" ] || fallo "el archivo descargado no trae la app."
-if [ -z "${ESCRIBA_DESTINO:-}" ] && pgrep -xq Escriba; then
-  osascript -e 'tell application id "com.gopoint.escriba" to quit' >/dev/null 2>&1 || true
-  for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -xq Escriba || break; sleep 0.5; done
-  pkill -x Escriba 2>/dev/null || true
+ditto -x -k "$TMP/app.zip" "$TMP/app"
+[ -d "$TMP/app/__APP__.app" ] || fallo "el archivo descargado no trae la app."
+if [ -z "${ESCRIBA_DESTINO:-}" ] && pgrep -xq __APP__; then
+  osascript -e 'tell application id "__BUNDLE__" to quit' >/dev/null 2>&1 || true
+  for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -xq __APP__ || break; sleep 0.5; done
+  pkill -x __APP__ 2>/dev/null || true
 fi
 [ ! -e "$APP" ] || rm -rf "$APP"
-ditto "$TMP/app/Escriba.app" "$APP"
+ditto "$TMP/app/__APP__.app" "$APP"
 xattr -dr com.apple.quarantine "$APP" 2>/dev/null || true
 
-echo "3 de 3: abriendo Escriba"
+echo "3 de 3: abriendo __NOMBRE__"
 [ -n "${ESCRIBA_NO_ABRIR:-}" ] || open "$APP"
 
 echo ""
-echo "Listo. Escriba (versión $VERSION) quedó instalada."
-echo "Busca el ícono de Escriba arriba a la derecha, en la barra de menú."
-echo "La primera vez te pide tu nombre y tres permisos: micrófono, accesibilidad y grabación de pantalla."
+echo "Listo. __NOMBRE__ (versión $VERSION) quedó instalada."
+echo "Busca su ícono arriba a la derecha, en la barra de menú."
+__DESPUES__
 echo ""
