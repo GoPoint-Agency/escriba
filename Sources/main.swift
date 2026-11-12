@@ -97,6 +97,55 @@ enum CLI {
             let m = AudioDevices.pickRealMic()
             print("tapa cerrada: \(AudioDevices.lidClosed ? "sí" : "no"); preferido: «\(Config.preferredMic)»; del sistema: \(m.system?.name ?? "ninguno"); se usaría: \(m.real?.name ?? "ninguno")")
             return 0
+        case "--probar-teclas":
+            // Prueba la lógica de las teclas del dictado sin tocar el teclado ni el micrófono.
+            let o = HoldKeys.rightOption, s = HoldKeys.rightShift, ls = HoldKeys.leftShift, cmd = HoldKeys.command
+            typealias Paso = (tecla: UInt16?, flags: UInt, espera: HoldKeys.Action)   // tecla nil = tecla normal
+            let casos: [(String, [Paso], Bool)] = [
+                ("solo ⌥ derecha: dicta en español", [(61, o, .start), (61, 0, .finish)], false),
+                ("⇧ derecha y después ⌥ derecha: traducido", [(60, s, .none), (61, o | s, .start), (61, s, .finish), (60, 0, .none)], true),
+                ("⌥ derecha y después ⇧ derecha: traducido", [(61, o, .start), (60, o | s, .translateOn), (60, o, .none), (61, 0, .finish)], true),
+                ("suelta ⇧ antes que ⌥: sigue traducido", [(61, o, .start), (60, o | s, .translateOn), (60, o, .none), (61, 0, .finish)], true),
+                ("⇧ izquierda con ⌥ derecha: no parte", [(56, ls, .none), (61, o | ls, .none), (61, ls, .none)], false),
+                ("⌘ con ⌥ derecha ya apretada: cancela", [(61, o, .start), (55, o | cmd, .cancel), (61, cmd, .finish)], false),
+                ("⌥ + ⇧ + letra: es un símbolo, cancela", [(61, o, .start), (60, o | s, .translateOn), (nil, o | s, .cancel), (61, s, .finish)], true),
+                ("⇧ derecha sola: no hace nada", [(60, s, .none), (60, 0, .none)], false),
+            ]
+            var fallas = 0
+            for (nombre, pasos, traducido) in casos {
+                var k = HoldKeys()
+                var bien = true
+                for p in pasos {
+                    let a = p.tecla.map { k.flagsChanged(keyCode: $0, raw: p.flags) } ?? k.keyPressed()
+                    if a != p.espera { bien = false; print("   esperaba \(p.espera), salió \(a)") }
+                }
+                if k.translate != traducido { bien = false; print("   traducido=\(k.translate), esperaba \(traducido)") }
+                if k.down { bien = false; print("   quedó apretada") }
+                print("\(bien ? "OK   " : "FALLA") \(nombre)")
+                if !bien { fallas += 1 }
+            }
+            print(fallas == 0 ? "Las \(casos.count) pasaron" : "\(fallas) fallaron")
+            return fallas == 0 ? 0 : 1
+        case "--traducir-texto":
+            // --traducir-texto "<texto>" [idioma]
+            guard args.count > 2 else { print("uso: --traducir-texto \"<texto>\" [idioma]"); return 1 }
+            return wait {
+                let t0 = Date()
+                let out = try await OpenAI.translate(args[2], to: args.count > 3 ? args[3] : Config.dictationLanguage)
+                print(String(format: "[%.1f s] %@", Date().timeIntervalSince(t0), out))
+            }
+        case "--dictar-traducido":
+            // --dictar-traducido <audio> [idioma]: lo mismo que hace el dictado con ⌥ + ⇧, sin pegar nada
+            guard args.count > 2 else { print("uso: --dictar-traducido <audio> [idioma]"); return 1 }
+            return wait {
+                let t0 = Date()
+                let es = TextClean.forDictation(try await Engine.transcribe(file: URL(fileURLWithPath: args[2]), prompt: Engine.vocabularyPrompt))
+                let t1 = Date()
+                let out = try await OpenAI.translate(es, to: args.count > 3 ? args[3] : Config.dictationLanguage)
+                print("Dictado: \(es)")
+                print("Traducido: \(out)")
+                print(String(format: "Transcribir %.1f s, traducir %.1f s", t1.timeIntervalSince(t0), Date().timeIntervalSince(t1)))
+            }
         case "--apps-microfono":
             // Qué apps tienen un micrófono abierto ahora (para no hacer pruebas con sonido en plena llamada)
             let u = AudioDevices.inputUsers()

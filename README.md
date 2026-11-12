@@ -6,6 +6,7 @@ App gratuita para la barra de menú del Mac: transcribe tus reuniones, te deja d
 
 - **Reuniones**: graba tu micrófono y el audio de la llamada por separado (Meet, Zoom, Teams o lo que suene en el Mac), transcribe y deja un Word con la transcripción y el audio en Google Drive o en Documentos. Con una clave de OpenAI suma resumen, acuerdos, tareas y nombres.
 - **Dictado**: mantén apretada la tecla ⌥ de la derecha, habla y suelta. El texto aparece donde está el cursor.
+- **Dictado traducido**: con ⌥ y ⇧ de la derecha a la vez, dictas en español y el texto sale en inglés, portugués, alemán, francés o italiano (se elige en el menú). Necesita una clave de OpenAI.
 - **Traducción en vivo**: escuchas en español lo que te dicen en inglés, y la otra persona te escucha en inglés. Usa `gpt-realtime-translate` de OpenAI con tu propia clave.
 
 Transcribe con Whisper dentro del Mac (gratis, sin internet tras una descarga única de 550 MB) o con OpenAI.

@@ -55,6 +55,15 @@ enum Config {
     static var voiceTo: String { settings["mi_voz_a"] as? String ?? "en" }
     /// Nombre (o parte) del micrófono virtual por donde sale tu voz traducida.
     static var virtualMicName: String { settings["microfono_virtual"] as? String ?? "BlackHole" }
+    /// Idiomas para el dictado traducido (⌥ + ⇧ derechas): código, nombre en el menú y nombre para el traductor.
+    static let dictationLanguages: [(code: String, name: String, prompt: String)] = [
+        ("en", "Inglés", "inglés"), ("pt", "Portugués", "portugués de Brasil"), ("de", "Alemán", "alemán"),
+        ("fr", "Francés", "francés"), ("it", "Italiano", "italiano"),
+    ]
+    static var dictationLanguage: String {
+        let c = settings["dictado_idioma"] as? String ?? "en"
+        return dictationLanguages.contains { $0.code == c } ? c : "en"
+    }
     /// Micrófono que se prefiere para traducir tu voz (parte del nombre). Vacío: el del sistema.
     static var preferredMic: String { settings["microfono"] as? String ?? "" }
     /// Presentar el micrófono virtual envuelto en un dispositivo agrupado (para apps que esconden los virtuales).

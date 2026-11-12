@@ -111,6 +111,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         case .transcribing: symbol = "ellipsis.circle"
         case .idle: if capture == nil && !processing.isEmpty { symbol = "doc.text.magnifyingglass" }
         }
+        // Dictado traducido: al lado del micrófono se ve a qué idioma va a salir.
+        if dictState != .idle, dictation.translating { title = " " + Config.dictationLanguage.uppercased() + title }
         let img = NSImage(systemSymbolName: symbol, accessibilityDescription: "Escriba")
         img?.isTemplate = true
         b.image = img
@@ -225,6 +227,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
         let hint = NSMenuItem(title: "Dictar: mantén apretada ⌥ derecha", action: nil, keyEquivalent: "")
         hint.isEnabled = false
         m.addItem(hint)
+        if Config.apiKey != nil {
+            // Dictas en español y el texto sale en el idioma elegido aquí.
+            let current = Config.dictationLanguage
+            let name = Config.dictationLanguages.first { $0.code == current }?.name ?? current
+            let tr = NSMenuItem(title: "Dictar traducido: ⌥ + ⇧ derechas (\(name))", action: nil, keyEquivalent: "")
+            let sub = NSMenu()
+            for (k, l) in Config.dictationLanguages.enumerated() {
+                let i = NSMenuItem(title: l.name, action: #selector(setDictationLanguage(_:)), keyEquivalent: "")
+                i.target = self
+                i.tag = k
+                i.state = l.code == current ? .on : .off
+                sub.addItem(i)
+            }
+            tr.submenu = sub
+            m.addItem(tr)
+        } else {
+            let tr = NSMenuItem(title: "Dictar traducido: necesita la clave de OpenAI", action: nil, keyEquivalent: "")
+            tr.isEnabled = false
+            m.addItem(tr)
+        }
         m.addItem(.separator())
         let out = Config.outputFolder()
         m.addItem(withTitle: out.isDrive ? "Abrir carpeta en Google Drive" : "Abrir carpeta de reuniones (local)",
@@ -317,6 +339,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     static let originalPresets: [(name: String, idle: Double, ducked: Double)] = [
         ("Apagada", 0, 0), ("Muy baja", 0.05, 0.02), ("Baja (recomendada)", 0.10, 0.04), ("Media", 0.20, 0.08),
     ]
+
+    @objc private func setDictationLanguage(_ sender: NSMenuItem) {
+        try? Config.update(["dictado_idioma": Config.dictationLanguages[sender.tag].code])
+    }
 
     @objc private func setOriginalVolume(_ sender: NSMenuItem) {
         let p = AppDelegate.originalPresets[sender.tag]
