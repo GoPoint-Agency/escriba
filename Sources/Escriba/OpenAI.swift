@@ -1,19 +1,5 @@
 import Foundation
 
-enum EscribaError: LocalizedError {
-    case noKey
-    case http(Int, String)
-    case other(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .noKey: return "Falta la clave de OpenAI"
-        case .http(let c, let m): return "OpenAI respondió \(c): \(m.prefix(200))"
-        case .other(let m): return m
-        }
-    }
-}
-
 struct Tarea: Codable {
     var responsable: String?
     var tarea: String

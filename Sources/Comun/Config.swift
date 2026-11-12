@@ -1,8 +1,8 @@
 import Foundation
 import Security
 
-/// Ajustes de Escriba. Se pueden cambiar en
-/// ~/Library/Application Support/Escriba/config.json sin recompilar.
+/// Ajustes de la app. Se pueden cambiar en
+/// ~/Library/Application Support/<app>/config.json sin recompilar. `kAppFolder` y `kLogFile` los define cada app.
 enum Config {
     static let appSupport: URL = {
         if let d = ProcessInfo.processInfo.environment["ESCRIBA_DIR"] {   // solo para pruebas
@@ -11,7 +11,7 @@ enum Config {
             return u
         }
         let u = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Escriba", isDirectory: true)
+            .appendingPathComponent(kAppFolder, isDirectory: true)
         try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
         return u
     }()
@@ -78,6 +78,27 @@ enum Config {
     static var clients: [String] { settings["clientes"] as? [String] ?? [] }
     static var stripOpeningMarks: Bool { settings["quitar_signos_apertura"] as? Bool ?? true }
 
+    /// Ajustes de la otra app de la familia (Escriba o Interprete), solo para leer.
+    static func sibling(_ folder: String) -> [String: Any] {
+        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent(folder, isDirectory: true).appendingPathComponent("config.json")
+        if let d = try? Data(contentsOf: url), let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any] { return j }
+        return [:]
+    }
+
+    /// Primera vez que se abre Intérprete: trae los ajustes de traducción que estaban en Escriba.
+    static func adoptFromEscriba() {
+        guard kAppFolder != "Escriba", !FileManager.default.fileExists(atPath: appSupport.appendingPathComponent("config.json").path) else { return }
+        let old = sibling("Escriba")
+        var mine: [String: Any?] = [:]
+        for k in ["traducir_a", "mi_voz_a", "microfono_virtual", "microfono", "microfono_puente", "subtitulos",
+                  "volumen_original", "volumen_original_con_voz", "voz_alcanza"] {
+            if let v = old[k] { mine[k] = v }
+        }
+        mine["configurado"] = true
+        try? update(mine)
+    }
+
     private static var cachedKey: String?
     private static let keyLock = NSLock()
 
@@ -90,6 +111,8 @@ enum Config {
         var k: String?
         if let v = settings["openai_api_key"] as? String, !v.isEmpty { k = v }
         if k == nil, let v = ProcessInfo.processInfo.environment["OPENAI_API_KEY"], !v.isEmpty { k = v }
+        // Intérprete usa la clave que ya esté puesta en Escriba, para no pedirla dos veces.
+        if k == nil, kAppFolder != "Escriba", let v = sibling("Escriba")["openai_api_key"] as? String, !v.isEmpty { k = v }
         if k == nil, let v = Keychain.get(), !v.isEmpty { k = v }
         cachedKey = k
         return k
@@ -168,7 +191,7 @@ enum Keychain {
 func log(_ s: String) {
     let line = "[\(ISO8601DateFormatter().string(from: Date()))] \(s)\n"
     FileHandle.standardError.write(Data(line.utf8))
-    let url = Config.appSupport.appendingPathComponent("escriba.log")
+    let url = Config.appSupport.appendingPathComponent(kLogFile)
     if let h = try? FileHandle(forWritingTo: url) {
         h.seekToEndOfFile(); h.write(Data(line.utf8)); try? h.close()
     } else {

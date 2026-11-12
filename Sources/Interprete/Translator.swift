@@ -365,7 +365,7 @@ final class LiveTranslator: NSObject, SCStreamOutput, SCStreamDelegate {
         engine.stop()
         if let activity { ProcessInfo.processInfo.endActivity(activity) }
         activity = nil
-        log("Traducción en vivo detenida a los \(MeetingSession.clock(Date().timeIntervalSince(startDate))): \(Int(speech)) s de voz original, \(Int(Double(st.loudOut) / kTR)) s de voz traducida, \(chars) letras")
+        log("Traducción en vivo detenida a los \(reloj(Date().timeIntervalSince(startDate))): \(Int(speech)) s de voz original, \(Int(Double(st.loudOut) / kTR)) s de voz traducida, \(chars) letras")
         log("Traducción en vivo, retraso: \(delay ?? "sin frases que medir"). \(Playout.describe(st))")
         if ProcessInfo.processInfo.environment["ESCRIBA_PRUEBA"] != nil { log("Texto de prueba: \(testText)") }
     }

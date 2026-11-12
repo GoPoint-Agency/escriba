@@ -148,20 +148,5 @@ final class SetupWindow: NSObject, NSWindowDelegate {
         onFinish?()
     }
 
-    /// nil si la clave sirve; si no, el motivo en palabras simples.
-    static func checkKey(_ key: String) async -> String? {
-        var req = URLRequest(url: URL(string: "https://api.openai.com/v1/models")!)
-        req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        req.timeoutInterval = 20
-        do {
-            let (_, resp) = try await URLSession.shared.data(for: req)
-            switch (resp as? HTTPURLResponse)?.statusCode ?? 0 {
-            case 200: return nil
-            case 401: return "OpenAI no reconoce esa clave. Revísala y vuelve a pegarla."
-            case let c: return "OpenAI respondió con un error (\(c)). Intenta de nuevo en un rato."
-            }
-        } catch {
-            return "No pude conectarme con OpenAI. Revisa internet."
-        }
-    }
+    static func checkKey(_ key: String) async -> String? { await OpenAIKey.check(key) }
 }

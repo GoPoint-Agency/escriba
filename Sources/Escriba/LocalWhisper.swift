@@ -160,11 +160,5 @@ final class ModelDownloader: NSObject, URLSessionDownloadDelegate {
         if let error { onDone?(error); s.finishTasksAndInvalidate() }
     }
 
-    static func sha256(_ url: URL) throws -> String {
-        let h = try FileHandle(forReadingFrom: url)
-        defer { try? h.close() }
-        var hasher = SHA256()
-        while let d = try h.read(upToCount: 8 << 20), !d.isEmpty { hasher.update(data: d) }
-        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
-    }
+    static func sha256(_ url: URL) throws -> String { try huellaSHA256(de: url) }
 }

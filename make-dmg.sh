@@ -3,7 +3,7 @@
 # Nunca incluye config.json, claves ni certs/.
 set -euo pipefail
 cd "$(dirname "$0")"
-./build.sh --no-install
+./build.sh escriba --no-install
 VER=$(date +%Y%m%d)
 STAGE=$(mktemp -d)
 mkdir -p "$STAGE/Escriba"

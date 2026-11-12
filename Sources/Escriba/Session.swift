@@ -1,5 +1,6 @@
 import AVFoundation
 import AppKit
+import CoreAudio
 import CoreMedia
 import ScreenCaptureKit
 
@@ -126,11 +127,7 @@ final class MeetingSession {
         }
     }
 
-    static func clock(_ t: Double) -> String {
-        let s = Int(t)
-        return s >= 3600 ? String(format: "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
-                         : String(format: "%02d:%02d", s / 60, s % 60)
-    }
+    static func clock(_ t: Double) -> String { reloj(t) }
 
     struct Line { let start: Double; var who: String; var text: String; var end: Double }
 
@@ -265,6 +262,42 @@ final class MeetingSession {
     }
 }
 
+/// Lee un micrófono concreto en vez del micrófono del sistema. Se usa mientras Intérprete traduce tu voz:
+/// ahí el micrófono del sistema es el virtual (sale tu voz traducida) y la grabación necesita tu voz real.
+final class RealMic: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
+    private var session: AVCaptureSession?
+    private let queue = DispatchQueue(label: "escriba.mic-real")
+    private(set) var name = ""
+    var onBuffer: ((AVAudioPCMBuffer, Double) -> Void)?
+
+    func start(preferido: String?) throws {
+        // El que tenía el sistema antes de que Intérprete lo cambiara; si no se sabe, el mejor que no sea virtual.
+        let before = preferido ?? Config.sibling("Interprete")["mic_anterior"] as? String
+        let real = AudioDevices.inputs.first { $0.uid == before && !AudioDevices.isVirtual($0.name) } ?? AudioDevices.pickRealMic().real
+        guard let real, !AudioDevices.isVirtual(real.name), let dev = AVCaptureDevice(uniqueID: real.uid) else {
+            throw EscribaError.other("No encontré tu micrófono real")
+        }
+        let s = AVCaptureSession()
+        s.addInput(try AVCaptureDeviceInput(device: dev))
+        let out = AVCaptureAudioDataOutput()
+        out.setSampleBufferDelegate(self, queue: queue)
+        s.addOutput(out)
+        s.startRunning()
+        session = s
+        name = real.name
+    }
+
+    func captureOutput(_ o: AVCaptureOutput, didOutput sb: CMSampleBuffer, from c: AVCaptureConnection) {
+        guard let pcm = sb.firstChannelBuffer() else { return }
+        onBuffer?(pcm, sb.presentationTimeStamp.seconds)
+    }
+
+    func stop() {
+        session?.stopRunning()
+        session = nil
+    }
+}
+
 /// Captura en vivo: micrófono con cancelación de eco + audio del sistema (lo que dicen los demás).
 final class LiveCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     let session: MeetingSession
@@ -274,24 +307,55 @@ final class LiveCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     private var activity: NSObjectProtocol?
     private let screenQueue = DispatchQueue(label: "escriba.screen")
     var onError: ((String) -> Void)?
-    /// El micrófono llega desde la traducción de voz (el del sistema es el virtual).
+    /// El micrófono del sistema es el virtual de Intérprete: tu voz se lee directo de tu micrófono real.
     private var externalMic = false
-    private var fedLogged = false
+    private var realMic: RealMic?
+    private var micListener: AudioObjectPropertyListenerBlock?
+    private var launchObserver: NSObjectProtocol?
+    private var running = false
+    static let interpreterBundleID = "com.gopoint.interprete"
 
-    init(session: MeetingSession, externalMic: Bool = false) { self.session = session; self.externalMic = externalMic }
+    init(session: MeetingSession) { self.session = session }
 
-    /// Cambia entre el micrófono propio y el que entrega la traducción de voz.
-    func useExternalMic(_ on: Bool) {
-        guard on != externalMic else { return }
+    /// El último micrófono real que tuvo el sistema: es el que hay que seguir grabando si Intérprete lo cambia.
+    private static var lastRealMicUID: String?
+
+    private static var systemMicIsVirtual: Bool {
+        guard let d = AudioDevices.defaultInput else { return false }
+        if AudioDevices.isVirtual(d.name) { return true }
+        lastRealMicUID = d.uid
+        return false
+    }
+
+    private func startRealMic() throws {
+        let m = RealMic()
+        m.onBuffer = { [weak self] buf, t in self?.feedMic(buf, hostTime: t) }
+        try m.start(preferido: LiveCapture.lastRealMicUID)
+        realMic = m
+        log("Grabación: Intérprete está traduciendo tu voz, grabo directo de «\(m.name)»")
+    }
+
+    /// Cambia entre el micrófono del sistema y tu micrófono real, según si Intérprete tomó el del sistema.
+    private func useExternalMic(_ on: Bool) {
+        guard running, on != externalMic else { return }
         externalMic = on
-        if on { stopMic() } else {
-            do { try startMic() } catch { log("No pude retomar el micrófono: \(error)"); onError?("No pude retomar el micrófono en la grabación.") }
+        do {
+            if on {
+                stopMic()
+                try startRealMic()
+            } else {
+                realMic?.stop()
+                realMic = nil
+                try startMic()
+            }
+        } catch {
+            log("No pude cambiar de micrófono en la grabación: \(error)")
+            onError?("No pude seguir grabando tu micrófono. La voz de los demás se sigue grabando.")
         }
     }
 
-    func feedMic(_ buf: AVAudioPCMBuffer, hostTime: Double) {
+    private func feedMic(_ buf: AVAudioPCMBuffer, hostTime: Double) {
         guard externalMic, hostStart > 0 else { return }
-        if !fedLogged { fedLogged = true; log("Grabación: el micrófono llega desde la traducción de voz") }
         let s = session
         let t = hostTime - hostStart
         let wall = LiveCapture.hostNow() - hostStart
@@ -304,13 +368,17 @@ final class LiveCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         hostStart = LiveCapture.hostNow()
         activity = ProcessInfo.processInfo.beginActivity(options: [.idleSystemSleepDisabled, .userInitiated],
                                                          reason: "Grabando una reunión")
-        if !externalMic { try startMic() }
+        externalMic = LiveCapture.systemMicIsVirtual
+        if externalMic { try startRealMic() } else { try startMic() }
         do {
             try await startSystemAudio()
         } catch {
             stopMic()
+            realMic?.stop()
             throw EscribaError.other("No pude capturar el audio de la reunión. Revisa el permiso de Grabación de pantalla y audio del sistema. (\(error.localizedDescription))")
         }
+        running = true
+        watch()
     }
 
     private func startMic() throws {
@@ -356,9 +424,7 @@ final class LiveCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     private func startSystemAudio() async throws {
-        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-        guard let display = content.displays.first else { throw EscribaError.other("No encontré pantalla") }
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let filter = try await systemFilter()
         let cfg = SCStreamConfiguration()
         cfg.capturesAudio = true
         cfg.excludesCurrentProcessAudio = true
@@ -376,6 +442,53 @@ final class LiveCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         log("Audio del sistema activo")
     }
 
+    /// Todo lo que suena en el Mac, menos Intérprete: su voz traducida no es parte de la reunión
+    /// y, si se grabara, quedaría encima de la voz original de los demás.
+    private func systemFilter() async throws -> SCContentFilter {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        guard let display = content.displays.first else { throw EscribaError.other("No encontré pantalla") }
+        var out = content.applications.filter { $0.bundleIdentifier == LiveCapture.interpreterBundleID }
+        if ProcessInfo.processInfo.environment["ESCRIBA_SIN_EXCLUIR"] != nil { out = [] }   // solo para pruebas
+        if !out.isEmpty { log("Grabación: dejo fuera el audio de Intérprete") }
+        return SCContentFilter(display: display, excludingApplications: out, exceptingWindows: [])
+    }
+
+    /// Avisos que la grabación necesita mientras dura: si Intérprete se abre, y si cambia el micrófono del sistema.
+    private func watch() {
+        launchObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main) { [weak self] n in
+            let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            guard let self, app?.bundleIdentifier == LiveCapture.interpreterBundleID else { return }
+            Task {
+                // Intérprete tarda un instante en aparecer en la lista de apps que se pueden excluir.
+                for _ in 0..<5 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    guard let st = self.stream else { return }
+                    do {
+                        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+                        guard content.applications.contains(where: { $0.bundleIdentifier == LiveCapture.interpreterBundleID }) else { continue }
+                        try await st.updateContentFilter(try await self.systemFilter())
+                        return
+                    } catch { log("Grabación: no pude dejar fuera a Intérprete: \(error.localizedDescription)") }
+                }
+                log("Grabación: Intérprete se abrió pero no aparece para excluirlo")
+            }
+        }
+        var a = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultInputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        let l: AudioObjectPropertyListenerBlock = { [weak self] _, _ in self?.useExternalMic(LiveCapture.systemMicIsVirtual) }
+        AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &a, DispatchQueue.main, l)
+        micListener = l
+    }
+
+    private func unwatch() {
+        if let o = launchObserver { NSWorkspace.shared.notificationCenter.removeObserver(o) }
+        launchObserver = nil
+        if let l = micListener {
+            var a = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultInputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+            AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &a, DispatchQueue.main, l)
+        }
+        micListener = nil
+    }
+
     func stream(_ stream: SCStream, didOutputSampleBuffer sb: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .audio, sb.isValid, let pcm = sb.toPCMBuffer() else { return }
         let t = sb.presentationTimeStamp.seconds - hostStart
@@ -388,9 +501,13 @@ final class LiveCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stop() async {
+        running = false
+        unwatch()
         if let stream { try? await stream.stopCapture() }
         stream = nil
         stopMic()
+        realMic?.stop()
+        realMic = nil
         let s = session
         await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
             s.queue.async { s.mic.flush(); s.sys.flush(); c.resume() }

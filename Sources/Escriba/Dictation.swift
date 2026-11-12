@@ -97,8 +97,8 @@ final class Dictation: NSObject {
 
     private func begin() {
         guard keys.down, !canceled, recorder == nil else { return }
-        if AudioDevices.realMicUID != nil {
-            onMessage?("El dictado no funciona mientras traduces tu voz. Detén la traducción de tu voz y dicta de nuevo.")
+        if let mic = AudioDevices.defaultInputName, AudioDevices.isVirtual(mic) {
+            onMessage?("El dictado no funciona mientras Intérprete traduce tu voz. Detén esa traducción y dicta de nuevo.")
             return
         }
         guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {

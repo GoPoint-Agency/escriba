@@ -45,7 +45,7 @@ enum VirtualMicInstaller {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let pkg = dir.appendingPathComponent("BlackHole2ch.pkg")
         try FileManager.default.moveItem(at: tmp, to: pkg)
-        guard try ModelDownloader.sha256(pkg) == src.sha else { throw EscribaError.other("La descarga del micrófono virtual llegó dañada.") }
+        guard try huellaSHA256(de: pkg) == src.sha else { throw EscribaError.other("La descarga del micrófono virtual llegó dañada.") }
         let sig = run("/usr/sbin/pkgutil", ["--check-signature", pkg.path])
         guard sig.code == 0, sig.out.contains("(\(teamID))"), sig.out.contains("Developer ID Installer: Existential Audio") else {
             throw EscribaError.other("El instalador del micrófono virtual no viene firmado por su fabricante.")
