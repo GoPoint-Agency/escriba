@@ -59,6 +59,7 @@ enum Config {
     static let dictationLanguages: [(code: String, name: String, prompt: String)] = [
         ("en", "Inglés", "inglés"), ("pt", "Portugués", "portugués de Brasil"), ("de", "Alemán", "alemán"),
         ("fr", "Francés", "francés"), ("it", "Italiano", "italiano"),
+        ("zh", "Chino mandarín", "chino mandarín, escrito en caracteres simplificados"), ("ko", "Coreano", "coreano"),
     ]
     static var dictationLanguage: String {
         let c = settings["dictado_idioma"] as? String ?? "en"
