@@ -72,6 +72,19 @@ jobs:
           if (Test-Path datos\interprete.log) { "== registro"; Get-Content datos\interprete.log }
           (Get-Item dist\Interprete.exe).Length
           if ($colgado) { exit 1 }
+      - name: La app de bandeja abre
+        shell: pwsh
+        run: |
+          $env:INTERPRETE_DIR = "$PWD\datos2"
+          $env:OPENAI_API_KEY = "clave-de-prueba"
+          $p = Start-Process -FilePath dist\Interprete.exe -PassThru
+          Start-Sleep -Seconds 12
+          $vivo = -not $p.HasExited
+          if ($vivo) { Stop-Process -Id $p.Id -Force }
+          "sigue abierta a los 12 s: $vivo"
+          Get-Content datos2\interprete.log
+          if (-not $vivo) { exit 1 }
+          if (-not (Select-String -Path datos2\interprete.log -Pattern 'iniciado' -Quiet)) { exit 1 }
       - uses: actions/upload-artifact@v4
         with:
           name: Interprete-Windows
