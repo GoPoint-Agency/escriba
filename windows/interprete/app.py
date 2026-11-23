@@ -8,7 +8,7 @@ import webbrowser
 from . import audio, core
 from .config import Config, carpeta, log
 
-VERSION = "20261123"
+VERSION = "20261123b"
 VOCES = [("Automática (la más rápida)", "auto"), ("Hombre (voz fija)", "hombre"), ("Mujer (voz fija)", "mujer")]
 NIVELES = [("Apagada", 0.0), ("Muy baja", 0.05), ("Baja (recomendada)", 0.10), ("Media", 0.20)]
 CABLE_URL = "https://vb-audio.com/Cable/"

@@ -122,9 +122,14 @@ class _Session:
         key = Config.api_key()
         if not key:
             raise core.TranslateError("Falta la clave de OpenAI.")
-        self.socket = core.TranslateSocket(key, language, voice=voice, on_audio=self.ring.write,
+        # La voz que entrega el modelo a veces llega baja: se nivela antes de reproducirla.
+        self.out_agc = core.Agc(target=0.5, max_gain=6.0, release=1.0)
+        self.socket = core.TranslateSocket(key, language, voice=voice, on_audio=self._translated,
                                            on_text=self._text, on_dropped=self._dropped, log=log)
         self.socket.connect()
+
+    def _translated(self, samples):
+        self.ring.write(self.out_agc.apply(samples))
 
     def _text(self, t):
         self.chars += len(t)
@@ -165,7 +170,10 @@ class _Session:
         if self.socket:
             self.socket.close()
         self._cleanup()
-        log(f"{self.name} detenida a los {int(time.time() - self.started)} s, {self.chars} letras traducidas")
+        extra = f", ganancia de salida x{self.out_agc.gain:.1f}" if getattr(self, "out_agc", None) else ""
+        if getattr(self, "mic_agc", None):
+            extra += f", ganancia del micrófono x{self.mic_agc.gain:.1f}"
+        log(f"{self.name} detenida a los {int(time.time() - self.started)} s, {self.chars} letras traducidas{extra}")
 
     def _cleanup(self):
         pass
@@ -193,6 +201,7 @@ class VoiceOut(_Session):
         self.own = core.Ring(cushion=0.04, limit=0.4)
         self.own_gain = core.Smooth(v, v * 0.5)
         self.chunker = core.Chunker(self.socket.append)
+        self.mic_agc = core.Agc()
         self.running = True
         self.started = time.time()
         self._spawn(self._play, "interprete.microfono-virtual")
@@ -205,7 +214,8 @@ class VoiceOut(_Session):
 
     def _ingest(self, samples):
         self.own.write(samples)
-        self.chunker.feed(samples)
+        # Muchos micrófonos de Windows entregan la voz baja, y el modelo contesta igual de bajo.
+        self.chunker.feed(self.mic_agc.apply(samples))
 
     def _capture(self):
         with self.mic.recorder(samplerate=core.RATE, channels=1, blocksize=DEV_BLOCK) as rec:
@@ -257,7 +267,9 @@ class Listen(_Session):
         self.started = time.time()
         modo = self._start_capture()
         self._spawn(self._play, "interprete.audifonos")
-        if sys.platform == "win32" and self.exclusive:
+        # El original se baja en los dos modos de captura: en el simple lo capturado llega más bajo, y lo
+        # compensa el nivelador de entrada.
+        if sys.platform == "win32":
             from . import volumen
             self.duck = volumen.Ducker(float(Config.get("volumen_original") or 0))
             self.duck.start()

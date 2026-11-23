@@ -69,6 +69,8 @@ class Ducker:
                         self._orig[pid] = vol.GetMasterVolume()
                         Config.update(volumenes_previos={str(k): v for k, v in self._orig.items()})
                     vol.SetMasterVolume(self._orig[pid] * self.level, None)
+                if last is None:
+                    log(f"Volumen de la llamada original al {int(self.level * 100)} % en {len(self._orig)} aplicaciones")
                 last = self.level
             except Exception as e:
                 if last is None:

@@ -291,8 +291,8 @@ class Smooth:
 class Agc:
     """Nivela lo que se captura: si el sistema tiene el volumen bajo, el modelo igual escucha bien."""
 
-    def __init__(self, target=0.12, max_gain=12.0):
-        self.target, self.max_gain = target, max_gain
+    def __init__(self, target=0.12, max_gain=12.0, release=2.0):
+        self.target, self.max_gain, self.release = target, max_gain, release
         self._level = target
         self.gain = 1.0
 
@@ -301,7 +301,7 @@ class Agc:
             return samples
         p = float(np.max(np.abs(samples)))
         if p > 0.004:                               # solo se mide cuando hay algo sonando
-            tau = 0.05 if p > self._level else 2.0          # sube al instante, baja en un par de segundos
+            tau = 0.05 if p > self._level else self.release          # sube al instante, baja en un par de segundos
             self._level += (p - self._level) * (1 - float(np.exp(-len(samples) / (tau * RATE))))
         self.gain = float(min(self.max_gain, max(1.0, self.target / max(self._level, 1e-4))))
         return np.clip(samples * self.gain, -1, 1)

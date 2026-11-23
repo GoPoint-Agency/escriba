@@ -143,6 +143,17 @@ class Colas(unittest.TestCase):
         self.assertGreater(float(np.max(np.abs(out))), 0.08)
         self.assertLessEqual(float(np.max(np.abs(g.apply(np.ones(100, dtype=np.float32))))), 1.0)
 
+    def test_agc_de_salida_sube_la_voz_baja_sin_saturar(self):
+        agc = core.Agc(target=0.5, max_gain=6.0, release=1.0)
+        t = np.arange(core.RATE * 4) / core.RATE
+        bajo = (0.05 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+        out = np.concatenate([agc.apply(bajo[i:i + 2400]) for i in range(0, len(bajo), 2400)])
+        self.assertGreater(float(np.max(np.abs(out[-core.RATE:]))), 0.25)
+        self.assertLessEqual(float(np.max(np.abs(out))), 1.0)
+        fuerte = (0.9 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+        out = np.concatenate([agc.apply(fuerte[i:i + 2400]) for i in range(0, len(fuerte), 2400)])
+        self.assertLessEqual(float(np.max(np.abs(out[-core.RATE:]))), 1.0)
+
     def test_resample(self):
         self.assertEqual(len(core.resample(np.zeros(48000, dtype=np.float32), 48000)), 24000)
 
