@@ -1,0 +1,65 @@
+name: Intérprete para Windows
+on:
+  push:
+    branches: [windows]
+    paths: ['windows/**', '.github/workflows/windows.yml']
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+      - name: Pruebas del núcleo
+        run: python -m unittest discover -s tests -v
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Compilar el capturador de audio
+        shell: cmd
+        run: |
+          cd helper
+          cl /nologo /EHsc /O2 /W3 captura.cpp /Fe:captura.exe ole32.lib mmdevapi.lib avrt.lib
+      - name: Dispositivos de audio del runner
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          Get-CimInstance Win32_SoundDevice | Format-Table Name, Status
+          python -m interprete.prueba dispositivos
+      - name: Capturador, prueba de arranque
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $p = Start-Process -FilePath helper\captura.exe -ArgumentList $PID -RedirectStandardOutput cap.raw -RedirectStandardError cap.err -PassThru -NoNewWindow
+          Start-Sleep -Seconds 3
+          if (!$p.HasExited) { Stop-Process -Id $p.Id -Force }
+          "codigo: $($p.ExitCode)"
+          "bytes capturados en 3 s: $((Get-Item cap.raw).Length) (esperado cerca de 288000)"
+          Get-Content cap.err
+      - name: Empaquetar
+        run: >
+          pyinstaller --noconfirm --onefile --noconsole --name Interprete
+          --add-binary "helper/captura.exe;."
+          --collect-data soundcard
+          --hidden-import pystray._win32
+          --collect-submodules pycaw
+          interprete_main.py
+      - name: El programa empaquetado arranca
+        shell: pwsh
+        run: |
+          $env:INTERPRETE_DIR = "$PWD\datos"
+          $p = Start-Process -FilePath dist\Interprete.exe -ArgumentList '--prueba','dispositivos' -PassThru -Wait
+          "codigo: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { exit 1 }
+          (Get-Item dist\Interprete.exe).Length
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Interprete-Windows
+          path: windows/dist/Interprete.exe
