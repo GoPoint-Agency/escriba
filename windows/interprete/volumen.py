@@ -43,6 +43,7 @@ class Ducker:
     def __init__(self, level):
         self.level = max(0.0, min(1.0, level))
         self.speaking = False
+        self.passthrough = False        # quien habla ya lo hace en tu idioma: se le oye a volumen normal
         self._orig = {}
         self._run = False
         self._thread = None
@@ -68,7 +69,7 @@ class Ducker:
                     if pid not in self._orig:
                         self._orig[pid] = vol.GetMasterVolume()
                         Config.update(volumenes_previos={str(k): v for k, v in self._orig.items()})
-                    vol.SetMasterVolume(self._orig[pid] * self.level, None)
+                    vol.SetMasterVolume(self._orig[pid] * (1.0 if self.passthrough else self.level), None)
                 if last is None:
                     log(f"Volumen de la llamada original al {int(self.level * 100)} % en {len(self._orig)} aplicaciones")
                 last = self.level
@@ -76,7 +77,7 @@ class Ducker:
                 if last is None:
                     log(f"No pude bajar el volumen de la llamada: {e}")
                     return
-            time.sleep(0.5)
+            time.sleep(0.25)
         try:
             for pid, vol in _sessions():
                 if pid in self._orig:

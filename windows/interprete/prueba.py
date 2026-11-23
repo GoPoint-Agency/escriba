@@ -4,6 +4,7 @@
 
 La clave de OpenAI se toma de OPENAI_API_KEY o del archivo de ajustes.
 """
+import os
 import sys
 import time
 import wave
@@ -37,8 +38,9 @@ def traducir(entrada, salida, idioma, voz=None):
     ring = core.Ring()
     texto = []
     caidas = []
+    filtro = core.EchoGuard() if os.environ.get("INTERPRETE_FILTRO") and not voz else None
     s = core.TranslateSocket(Config.api_key(), idioma, voice=core.VOICES.get(voz), on_audio=ring.write,
-                             on_text=texto.append, on_dropped=caidas.append)
+                             on_text=texto.append, on_dropped=caidas.append, guard=filtro)
     t0 = time.monotonic()
     s.connect()
     print(f"Conectado en {time.monotonic() - t0:.1f} s ({'voz ' + voz if voz else 'voz automática'})")
@@ -63,6 +65,8 @@ def traducir(entrada, salida, idioma, voz=None):
     escribir_wav(salida, out)
     con_voz = float(np.sum(np.abs(out) > 0.02)) / core.RATE
     print("Traducción:", "".join(texto))
+    if filtro:
+        print(f"Filtro de repetición: {filtro.skipped:.1f} s de voz que ya venía en el idioma de destino no se reprodujeron")
     print(f"Guardado {salida}: {len(out) / core.RATE:.1f} s, {con_voz:.1f} s con voz")
     return "".join(texto)
 

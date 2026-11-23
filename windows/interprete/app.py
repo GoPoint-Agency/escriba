@@ -8,7 +8,7 @@ import webbrowser
 from . import audio, core
 from .config import Config, carpeta, log
 
-VERSION = "20261123b"
+VERSION = "20261123c"
 VOCES = [("Automática (la más rápida)", "auto"), ("Hombre (voz fija)", "hombre"), ("Mujer (voz fija)", "mujer")]
 NIVELES = [("Apagada", 0.0), ("Muy baja", 0.05), ("Baja (recomendada)", 0.10), ("Media", 0.20)]
 CABLE_URL = "https://vb-audio.com/Cable/"
@@ -219,6 +219,8 @@ class App:
             Item("Voz con que me escuchan", voces),
             Item("Mi voz original de fondo (para quien me escucha)", propia),
             Item("Volumen de la llamada original (para mí)", original),
+            Item("No repetir lo que ya viene en español", self.toggle_echo,
+                 checked=lambda _: bool(Config.get("no_repetir_mi_idioma"))),
             Menu.SEPARATOR,
             Item("Instalar el micrófono virtual (VB-CABLE)…", self.install_cable, visible=lambda _: audio.virtual_mic() is None),
             Item(lambda _: "Clave de OpenAI…" if Config.api_key() else "Poner la clave de OpenAI…",
@@ -227,6 +229,11 @@ class App:
             Item(f"Intérprete {VERSION}", None, enabled=False),
             Item("Salir", self.quit),
         )
+
+    def toggle_echo(self, *_):
+        Config.update(no_repetir_mi_idioma=not Config.get("no_repetir_mi_idioma"))
+        if self.listen:
+            self.notify("Intérprete", "El cambio se aplica la próxima vez que actives la traducción de lo que escuchas.")
 
     def run(self):
         import pystray

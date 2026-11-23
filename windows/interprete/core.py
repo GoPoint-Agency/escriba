@@ -12,6 +12,7 @@ import json
 import os
 import threading
 import time
+import unicodedata
 
 import numpy as np
 from websockets.sync.client import connect
@@ -45,7 +46,8 @@ def _instructions(language):
 class TranslateSocket:
     """Se le manda audio sin parar (también el silencio) y devuelve voz y texto traducidos por los callbacks."""
 
-    def __init__(self, api_key, language, voice=None, on_audio=None, on_text=None, on_dropped=None, log=print):
+    def __init__(self, api_key, language, voice=None, on_audio=None, on_text=None, on_dropped=None, log=print,
+                 guard=None):
         self.api_key = api_key
         self.language = language
         self.voice = voice                      # None = motor automático
@@ -53,6 +55,7 @@ class TranslateSocket:
         self.on_text = on_text or (lambda t: None)
         self.on_dropped = on_dropped or (lambda m: None)
         self.log = log
+        self.guard = guard                      # EchoGuard: no repetir lo que ya viene en el idioma de destino
         self.agent = voice is not None
         self._ws = None
         self._send_lock = threading.Lock()
@@ -97,7 +100,10 @@ class TranslateSocket:
                 self.close()
                 raise TranslateError(err)
         else:
-            self._send({"type": "session.update", "session": {"audio": {"output": {"language": self.language}}}})
+            audio = {"output": {"language": self.language}}
+            if self.guard:
+                audio["input"] = {"transcription": {"model": "gpt-realtime-whisper"}}
+            self._send({"type": "session.update", "session": {"audio": audio}})
 
     def append(self, samples):
         """Audio mono float32 a 24 kHz. Conviene mandar trozos de 200 ms."""
@@ -132,9 +138,18 @@ class TranslateSocket:
         if t in ("session.output_audio.delta", "response.output_audio.delta"):
             d = base64.b64decode(j.get("delta", ""))
             if len(d) >= 2:
-                self.on_audio(np.frombuffer(d[:len(d) // 2 * 2], dtype="<i2").astype(np.float32) / 32768)
+                a = np.frombuffer(d[:len(d) // 2 * 2], dtype="<i2").astype(np.float32) / 32768
+                if self.guard:
+                    a = self.guard.audio(a)
+                if a is not None:
+                    self.on_audio(a)
         elif t in ("session.output_transcript.delta", "response.output_audio_transcript.delta"):
+            if self.guard:
+                self.guard.translated(j.get("delta", ""))
             self.on_text(j.get("delta", ""))
+        elif t == "session.input_transcript.delta":
+            if self.guard:
+                self.guard.source(j.get("delta", ""))
         elif t == "session.updated":
             self._updated.set()
         elif t == "input_audio_buffer.committed" and self.agent:
@@ -196,6 +211,142 @@ def _friendly(e):
     if "timed out" in s or "getaddrinfo" in s or "Network" in s:
         return "No pude conectarme con OpenAI. Revisa internet."
     return "Se cortó la conexión con OpenAI: " + s[:160]
+
+
+def _norm(text):
+    """Texto a palabras comparables: minúsculas, sin tildes ni signos. Cada carácter chino, japonés o coreano va solo."""
+    out, cur = [], []
+    for ch in unicodedata.normalize("NFD", text.lower()):
+        if unicodedata.combining(ch):
+            continue
+        if ch.isalnum():
+            if ord(ch) >= 0x2E80:
+                if cur:
+                    out.append("".join(cur)); cur = []
+                out.append(ch)
+            else:
+                cur.append(ch)
+        elif cur:
+            out.append("".join(cur)); cur = []
+    if cur:
+        out.append("".join(cur))
+    return out
+
+
+class EchoGuard:
+    """Evita que el intérprete repita lo que ya viene en el idioma de quien escucha.
+
+    El modelo de traducción, cuando alguien habla en el idioma de destino, lo repite con otras palabras. Aquí se
+    compara el texto de lo que el modelo va a decir con el texto de lo que se escuchó (los dos llegan antes que la
+    voz): si son casi las mismas palabras, es una repetición y esa voz no se reproduce. No depende del idioma.
+    """
+    HOLD, PASS, ECHO = "espera", "pasa", "repite"
+
+    def __init__(self, clock=time.monotonic):
+        self._clock = clock
+        self._src = []                  # (momento, palabra) de lo escuchado
+        self._src_tail = ""             # palabra de lo escuchado que aún puede seguir creciendo
+        self._out = []                  # palabras de lo que dice el modelo en esta intervención
+        self._out_tail = ""
+        self._last_out = -1e9
+        self._last_src = -1e9
+        self._src_run = -1e9            # cuándo empezó la racha actual de habla escuchada
+        self.state = self.PASS
+        self._pending = []
+        self._hold_since = None
+        self.skipped = 0.0              # segundos de voz repetida que no se reprodujeron
+
+    # Texto ------------------------------------------------------------------------------------------------
+
+    def _words(self, tail, delta):
+        """Une los trozos de texto en palabras. Devuelve (palabras completas, resto que puede seguir creciendo)."""
+        text = tail + delta
+        if not text or not text[-1].isalnum():
+            return _norm(text), ""
+        cut = len(text)
+        while cut > 0 and (text[cut - 1].isalnum() or unicodedata.combining(text[cut - 1])):
+            cut -= 1
+        return _norm(text[:cut]), text[cut:]
+
+    def source(self, delta):
+        now = self._clock()
+        if now - self._last_src > 1.5:
+            self._src_run = now
+        self._last_src = now
+        done, self._src_tail = self._words(self._src_tail, delta)
+        self._src += [(now, w) for w in done]
+        self._src = [(t, w) for t, w in self._src if now - t < 15][-80:]
+
+    def translated(self, delta):
+        now = self._clock()
+        if now - self._last_out > 1.5:                # intervención nueva: se decide de nuevo
+            self._out, self._out_tail = [], ""
+            self.state = self.HOLD
+            self._hold_since = None
+        self._last_out = now
+        done, self._out_tail = self._words(self._out_tail, delta)
+        self._out = (self._out + done)[-12:]
+        self._decide()
+
+    def _decide(self):
+        """Compara las palabras con contenido (4 letras o más) de lo que dice el modelo con lo recién escuchado."""
+        now = self._clock()
+        heard = {w for t, w in self._src if now - t < 6.0}
+        tail = _norm(self._src_tail)
+        partial = tail[-1] if tail else ""
+
+        def strong(w):
+            return len(w) >= 4 or ord(w[0]) >= 0x2E80
+
+        words = [w for w in self._out if strong(w)][-4:]
+        hits = sum(1 for w in words if w in heard or (partial and partial.startswith(w)))
+        n = len(words)
+        cur = [w for w in _norm(self._out_tail) if strong(w)]
+        if cur:                                       # la palabra que el modelo está diciendo cuenta si ya se reconoce
+            n += 1
+            hits += 1 if any(h.startswith(cur[-1]) for h in heard) or partial.startswith(cur[-1]) else 0
+        if n == 0:
+            return
+        frac = hits / n
+        if self.state == self.HOLD:
+            if hits == 0:
+                self.state = self.PASS                # la primera palabra ya es distinta: es traducción, sin esperar
+            elif n >= 2:
+                self.state = self.ECHO if frac >= 0.6 else self.PASS
+        elif self.state == self.PASS and n >= 3 and frac >= 0.75:
+            self.state = self.ECHO
+        elif self.state == self.ECHO and n >= 3 and frac <= 0.34:
+            self.state = self.PASS
+
+    # Audio ------------------------------------------------------------------------------------------------
+
+    def audio(self, samples):
+        """Devuelve lo que hay que reproducir (puede ser nada)."""
+        now = self._clock()
+        if self.state == self.HOLD:
+            if self._hold_since is None:
+                self._hold_since = now
+            if now - self._hold_since < 0.7:
+                self._pending.append(samples)
+                return None
+            self.state = self.PASS                    # sin texto a tiempo: ante la duda, se traduce
+        if self.state == self.ECHO:
+            self.skipped += (sum(len(p) for p in self._pending) + len(samples)) / RATE
+            self._pending = []
+            return None
+        if self._pending:
+            samples = np.concatenate(self._pending + [samples])
+            self._pending = []
+        return samples
+
+    @property
+    def same_language(self):
+        """Cierto mientras quien habla ya lo hace en el idioma de quien escucha: el original debe oírse normal."""
+        now = self._clock()
+        if self.state == self.ECHO and now - self._last_out < 2.5:
+            return True
+        # El modelo a veces ni siquiera repite: se oye hablar hace rato y no dice nada.
+        return now - self._last_src < 1.5 and now - self._src_run > 2.5 and now - self._last_out > 3.0
 
 
 class Ring:

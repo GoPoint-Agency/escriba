@@ -158,5 +158,52 @@ class Colas(unittest.TestCase):
         self.assertEqual(len(core.resample(np.zeros(48000, dtype=np.float32), 48000)), 24000)
 
 
+class Repeticion(unittest.TestCase):
+    """EchoGuard: lo que ya viene en el idioma de quien escucha no se repite; la traducción real sí suena."""
+
+    def run_guard(self, events):
+        now = [0.0]
+        g = core.EchoGuard(clock=lambda: now[0])
+        played = 0
+        for t, kind, value in events:
+            now[0] = t
+            if kind == "o":
+                g.source(value)
+            elif kind == "t":
+                g.translated(value)
+            else:
+                out = g.audio(np.zeros(int(value * core.RATE), dtype=np.float32))
+                played += 0 if out is None else len(out)
+        return g, played / core.RATE
+
+    def test_no_repite_lo_que_ya_viene_en_el_idioma(self):
+        ev = [(1.5, "o", " ¿Qué pasa con"), (2.1, "t", "¿Qué"), (2.2, "o", " otro"), (2.4, "t", " pasa"),
+              (2.5, "o", " tipo de"), (2.6, "a", 0.4), (2.9, "o", " negocios?"), (3.0, "t", " con"), (3.1, "a", 0.4),
+              (3.2, "t", " otro"), (3.4, "t", " tipo"), (3.5, "a", 0.4), (3.8, "t", " de negocios"), (3.9, "a", 0.4)]
+        g, played = self.run_guard(ev)
+        self.assertEqual(g.state, g.ECHO)
+        self.assertEqual(played, 0)
+        self.assertTrue(g.same_language)
+
+    def test_la_traduccion_real_suena_completa_y_sin_espera(self):
+        ev = [(2.8, "o", " Good morning"), (3.2, "t", "Buenos"), (3.7, "o", " everyone"), (3.75, "t", " días"),
+              (3.8, "a", 0.4), (4.1, "t", " a"), (4.3, "a", 0.4), (4.5, "t", " todos"), (4.7, "a", 0.4)]
+        g, played = self.run_guard(ev)
+        self.assertEqual(g.state, g.PASS)
+        self.assertAlmostEqual(played, 1.2, places=3)
+        self.assertFalse(g.same_language)
+
+    def test_frase_anterior_en_el_otro_idioma_no_confunde(self):
+        ev = [(2.3, "o", " gracias por conectarse."), (9.8, "t", "Gracias"), (10.0, "a", 0.4),
+              (10.1, "o", " Thanks for having me."), (10.4, "t", " por invitarme"), (10.6, "a", 0.4)]
+        g, played = self.run_guard(ev)
+        self.assertAlmostEqual(played, 0.8, places=3)
+
+    def test_sin_texto_a_tiempo_se_traduce(self):
+        ev = [(1.0, "t", " Sí"), (1.1, "a", 0.3), (1.5, "a", 0.3), (1.9, "a", 0.3)]
+        g, played = self.run_guard(ev)
+        self.assertAlmostEqual(played, 0.9, places=3)
+
+
 if __name__ == "__main__":
     unittest.main()

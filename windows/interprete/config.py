@@ -24,6 +24,7 @@ class Config:
         "voz_traduccion": "auto",      # auto | hombre | mujer
         "mi_voz_original": 0.10,       # cuánto se oye tu voz original por debajo de la traducción
         "volumen_original": 0.10,      # cuánto se oye a los demás por debajo de la traducción
+        "no_repetir_mi_idioma": True,  # si alguien ya habla en tu idioma, no se traduce ni se repite
         "microfono": "",               # parte del nombre; vacío = el del sistema
         "microfono_virtual": "CABLE Input",
     }

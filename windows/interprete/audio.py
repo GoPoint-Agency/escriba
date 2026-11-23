@@ -118,14 +118,14 @@ class _Session:
         self._stopped = threading.Event()
         self.problem = None
 
-    def _open_socket(self, language, voice=None):
+    def _open_socket(self, language, voice=None, guard=None):
         key = Config.api_key()
         if not key:
             raise core.TranslateError("Falta la clave de OpenAI.")
         # La voz que entrega el modelo a veces llega baja: se nivela antes de reproducirla.
         self.out_agc = core.Agc(target=0.5, max_gain=6.0, release=1.0)
         self.socket = core.TranslateSocket(key, language, voice=voice, on_audio=self._translated,
-                                           on_text=self._text, on_dropped=self._dropped, log=log)
+                                           on_text=self._text, on_dropped=self._dropped, log=log, guard=guard)
         self.socket.connect()
 
     def _translated(self, samples):
@@ -170,6 +170,8 @@ class _Session:
         if self.socket:
             self.socket.close()
         self._cleanup()
+        if getattr(self, "guard", None):
+            log(f"{self.name}: {self.guard.skipped:.0f} s de voz que ya venía en tu idioma no se repitieron")
         extra = f", ganancia de salida x{self.out_agc.gain:.1f}" if getattr(self, "out_agc", None) else ""
         if getattr(self, "mic_agc", None):
             extra += f", ganancia del micrófono x{self.mic_agc.gain:.1f}"
@@ -258,7 +260,9 @@ class Listen(_Session):
         if spk is None:
             raise core.TranslateError("No encontré tus audífonos o parlantes.")
         self.spk = spk
-        self._open_socket(Config.get("traducir_a"))
+        # Si alguien ya habla en tu idioma, no se repite: esa voz se deja pasar tal cual.
+        self.guard = core.EchoGuard() if Config.get("no_repetir_mi_idioma") else None
+        self._open_socket(Config.get("traducir_a"), guard=self.guard)
         self.agc = core.Agc()
         self.chunker = core.Chunker(self.socket.append)
         self.helper = None
@@ -351,6 +355,7 @@ class Listen(_Session):
                 block = self.ring.read(BLOCK)
                 if self.duck:
                     self.duck.speaking = self.ring.speaking
+                    self.duck.passthrough = bool(self.guard and self.guard.same_language)
                 p.play(block)
 
     def set_original_volume(self, v):
