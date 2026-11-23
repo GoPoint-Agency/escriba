@@ -51,14 +51,27 @@ jobs:
           --hidden-import pystray._win32
           --collect-submodules pycaw
           interprete_main.py
+      - name: Versión con consola, para ver errores
+        run: >
+          pyinstaller --noconfirm --onefile --console --name Interprete-consola
+          --add-binary "helper/captura.exe;."
+          --collect-data soundcard
+          --hidden-import pystray._win32
+          --collect-submodules pycaw
+          interprete_main.py
       - name: El programa empaquetado arranca
         shell: pwsh
         run: |
           $env:INTERPRETE_DIR = "$PWD\datos"
-          $p = Start-Process -FilePath dist\Interprete.exe -ArgumentList '--prueba','dispositivos' -PassThru -Wait
-          "codigo: $($p.ExitCode)"
-          if ($p.ExitCode -ne 0) { exit 1 }
+          foreach ($exe in 'Interprete-consola.exe', 'Interprete.exe') {
+            $p = Start-Process -FilePath "dist\$exe" -ArgumentList '--prueba','dispositivos' -PassThru -RedirectStandardOutput "sal-$exe.txt" -RedirectStandardError "err-$exe.txt"
+            if (-not $p.WaitForExit(60000)) { Stop-Process -Id $p.Id -Force; "$exe se colgo (60 s)"; $colgado = $true }
+            "== $exe codigo: $($p.ExitCode)"
+            Get-Content "sal-$exe.txt", "err-$exe.txt" -ErrorAction SilentlyContinue
+          }
+          if (Test-Path datos\interprete.log) { "== registro"; Get-Content datos\interprete.log }
           (Get-Item dist\Interprete.exe).Length
+          if ($colgado) { exit 1 }
       - uses: actions/upload-artifact@v4
         with:
           name: Interprete-Windows
