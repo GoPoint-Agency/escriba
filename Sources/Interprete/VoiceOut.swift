@@ -148,6 +148,8 @@ final class VoiceTranslator: NSObject, AVCaptureAudioDataOutputSampleBufferDeleg
     private lazy var feeder = Feeder(socket: socket)
     private let playout = Playout(speedUp: Config.catchUp)
     private let meter = LatencyMeter()
+    /// Tu voz original, para que quien escucha la oiga bajito por debajo de la traducción (como en una interpretación real).
+    private let ownVoice = AudioRing(sampleRate: kTR, cushion: 0.04, limit: 0.4)
     private var activity: NSObjectProtocol?
     private var timer: DispatchSourceTimer?
     private var stopped = false
@@ -173,11 +175,19 @@ final class VoiceTranslator: NSObject, AVCaptureAudioDataOutputSampleBufferDeleg
         socket.onAudio = { p.push($0) }
         socket.onText = { [weak self] t in self?.queue.async { self?.chars += t.count; self?.testText += t } }
         socket.onDropped = { [weak self] m in self?.autoStop(m) }
-        try await socket.connect(language: language)
+        try await socket.connect(language: language, voice: Config.fixedVoice)
         do {
             // Salida: directo al micrófono virtual, nunca a los audífonos.
             let o = DeviceOutput(device: mic.id)
-            o.source = { p.pull($0, $1) }
+            let own = ownVoice
+            setOwnVoice(Config.ownVoiceVolume, immediately: true)
+            o.source = { out, n in
+                p.pull(out, n)
+                // Encima de la traducción va tu voz original, bajita. Si está apagada, el anillo entrega ceros.
+                var mix = [Float](repeating: 0, count: n)
+                mix.withUnsafeMutableBufferPointer { own.read($0.baseAddress!, n, ducked: p.speaking) }
+                for i in 0..<n { out[i] = max(-1, min(1, out[i] + mix[i])) }
+            }
             try o.start()
             output = o
             bridge = Config.useBridge ? AudioDevices.createBridge(over: mic.id) : nil
@@ -209,7 +219,7 @@ final class VoiceTranslator: NSObject, AVCaptureAudioDataOutputSampleBufferDeleg
         t.setEventHandler { [weak self] in self?.pump() }
         t.resume()
         timer = t
-        log("Traducción de mi voz activa (\(language)): \(real.name) → \(mic.name)\(bridge != nil ? " (presentado como \(AudioDevices.bridgeName))" : "")")
+        log("Traducción de mi voz activa (\(language)): \(real.name) → \(mic.name)\(bridge != nil ? " (presentado como \(AudioDevices.bridgeName))" : ""); voz \(Config.voiceChoice); mi voz original de fondo al \(Int(Config.ownVoiceVolume * 100)) %")
     }
 
     func captureOutput(_ o: AVCaptureOutput, didOutput sb: CMSampleBuffer, from c: AVCaptureConnection) {
@@ -237,7 +247,14 @@ final class VoiceTranslator: NSObject, AVCaptureAudioDataOutputSampleBufferDeleg
     }
 
     private func ingest(_ s: [Float]) {
+        ownVoice.write(s)
         feeder.ingest(s)
+    }
+
+    /// Cuánto se oye tu voz original por debajo de la traducción (0 la apaga). Mientras suena la traducción baja a la mitad.
+    func setOwnVoice(_ volume: Double, immediately: Bool = false) {
+        let v = Float(max(0, min(0.5, volume)))
+        ownVoice.setLevels(idle: v, ducked: v * 0.5, immediately: immediately)
     }
 
     private func pump() {

@@ -74,6 +74,12 @@ enum Config {
     static var originalVolume: Double { settings["volumen_original"] as? Double ?? 0.10 }
     /// Volumen del original mientras suena la voz traducida.
     static var originalVolumeDucked: Double { settings["volumen_original_con_voz"] as? Double ?? originalVolume * 0.4 }
+    /// Voz con que te escuchan los demás: "auto" (la elige el modelo de traducción, lo más rápido), "hombre" o "mujer".
+    static var voiceChoice: String { settings["voz_traduccion"] as? String ?? "auto" }
+    /// Nombre de la voz de OpenAI para la elección anterior; nil si es automática.
+    static var fixedVoice: String? { ["hombre": "cedar", "mujer": "marin"][voiceChoice] }
+    /// Cuánto se oye tu voz original, por debajo de la traducción, en el micrófono que escuchan los demás (0 la apaga).
+    static var ownVoiceVolume: Double { settings["mi_voz_original"] as? Double ?? 0.10 }
     /// Si la red tropieza y la traducción se atrasa, acelerar un poco la voz hasta ponerse al día.
     static var catchUp: Bool { settings["voz_alcanza"] as? Bool ?? true }
     static var clients: [String] { settings["clientes"] as? [String] ?? [] }

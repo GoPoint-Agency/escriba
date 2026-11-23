@@ -43,3 +43,12 @@ App separada de Escriba el 12-nov. Escriba = lo que escribe (reuniones, dictado,
 2. Jesús debe instalar Intérprete aparte (BlackHole ya lo tiene).
 3. Developer ID y notarización.
 4. Probar en Meet, Zoom y Teams.
+
+## 23-nov-2026: voz fija, voz original de fondo y retraso (pedido de Seba por los comentarios de Jesús)
+- **Voz con que me escuchan** (menú, `voz_traduccion`: auto | hombre | mujer). `gpt-realtime-translate` NO deja elegir voz (`Unknown parameter: 'session.audio.output.voice'`, probado); imita la que escucha y a veces sale de otro género. Con hombre o mujer se usa otro motor: `gpt-realtime-2.1` por `wss://api.openai.com/v1/realtime` como intérprete (voces `cedar` y `marin`, velocidad 1,15, `server_vad` con 250 ms de silencio y `create_response: false`).
+- Con voz fija cada frase se traduce sola: al llegar `input_audio_buffer.committed` se pide `response.create` con `conversation: "none"` e `input: [item_reference]`, una a la vez y en orden, y se borra el ítem al terminar. Con la conversación normal y respuesta automática se vio: frases perdidas («Conversation already has an active response»), una repetida y una inventada. No volver a ese esquema.
+- No se manda audio hasta recibir `session.updated`: si OpenAI rechaza los ajustes, el modelo queda sin instrucciones y contesta como asistente (se vio en una prueba).
+- Retraso medido (es5p.wav, 5 frases): automática empieza -0,2 s respecto del fin de la frase y termina +2,7 s; voz fija empieza +1,5 a +1,7 s y termina +3,6 a +4,0 s. Bajar el silencio a 200 ms, el colchón a 80 ms o usar `semantic_vad` no mejoró (semantic empeoró). El piso es el modelo.
+- **Mi voz original de fondo** (menú, `mi_voz_original`, por defecto 0,10): la voz del micrófono real se mezcla en el micrófono virtual por debajo de la traducción y baja a la mitad mientras suena (`ownVoice` en VoiceOut.swift). Probado grabando BlackHole.
+- Pruebas: `ESCRIBA_VOZ_FIJA=cedar|marin Interprete --traducir|--simular ...`; variables `ESCRIBA_VOZ_SILENCIO_MS`, `ESCRIBA_VOZ_VELOCIDAD`, `ESCRIBA_VOZ_SEMANTICA`, `ESCRIBA_COLCHON_MS`, `ESCRIBA_SALIDA_EXTRA` (JSON extra para audio.output del modelo de traducción).
+- Sin medir: costo real del motor de voz fija (precio de lista de audio: US$32 entrada y US$64 salida por millón de tokens). Sin probar: llamada real con voz fija, y si `cedar` y `marin` suenan bien en español (solo se probó hacia inglés).

@@ -62,9 +62,33 @@ final class TranslateSocket {
     private var seen = Set<String>()
     private var closedWaiter: CheckedContinuation<Void, Never>?
 
-    func connect(language: String, sourceTranscript: Bool = false) async throws {
+    /// Modelo conversacional con voz fija: se usa cuando se elige voz de hombre o de mujer.
+    static let agentModel = ProcessInfo.processInfo.environment["ESCRIBA_MODELO_VOZ"] ?? "gpt-realtime-2.1"
+    static let languageNames = ["en": "English", "es": "Spanish", "pt": "Portuguese", "de": "German", "fr": "French", "it": "Italian",
+                                "zh": "Mandarin Chinese", "ko": "Korean", "ja": "Japanese"]
+    /// Con voz fija la conexión habla otro dialecto de eventos.
+    private var agent = false
+    private var items: [String] = []
+    private var current: String?
+
+    /// Traduce la siguiente frase en espera, si no hay otra diciéndose.
+    private func nextPhrase() {
+        guard current == nil, !items.isEmpty else { return }
+        let id = items.removeFirst()
+        current = id
+        send(["type": "response.create",
+              "response": ["conversation": "none", "output_modalities": ["audio"], "input": [["type": "item_reference", "id": id]]]])
+    }
+
+    /// `voice`: nil deja que el modelo de traducción elija la voz (imita la que escucha). Con un nombre de voz
+    /// («cedar», «marin»…) se usa el modelo conversacional como intérprete, que sí respeta la voz pedida.
+    func connect(language: String, sourceTranscript: Bool = false, voice: String? = nil) async throws {
         guard let key = Config.apiKey else { throw EscribaError.noKey }
-        var req = URLRequest(url: URL(string: "wss://api.openai.com/v1/realtime/translations?model=\(TranslateSocket.model)")!)
+        let voice = voice ?? ProcessInfo.processInfo.environment["ESCRIBA_VOZ_FIJA"]
+        agent = voice != nil
+        let url = agent ? "wss://api.openai.com/v1/realtime?model=\(TranslateSocket.agentModel)"
+                        : "wss://api.openai.com/v1/realtime/translations?model=\(TranslateSocket.model)"
+        var req = URLRequest(url: URL(string: url)!)
         req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         req.timeoutInterval = 15
         let t = URLSession.shared.webSocketTask(with: req)
@@ -77,9 +101,51 @@ final class TranslateSocket {
             }
             q.asyncAfter(deadline: .now() + 15) { self.failReady(EscribaError.other("OpenAI no respondió a tiempo. Revisa internet.")) }
         }
+        if let voice {
+            let env = ProcessInfo.processInfo.environment
+            let name = TranslateSocket.languageNames[language] ?? language
+            var output: [String: Any] = ["format": ["type": "audio/pcm", "rate": 24000], "voice": voice]
+            output["speed"] = Double(env["ESCRIBA_VOZ_VELOCIDAD"] ?? "") ?? 1.15   // un poco más rápido: recupera parte del retraso
+            var turn: [String: Any] = ["type": "server_vad", "threshold": 0.5, "prefix_padding_ms": 300,
+                                       "silence_duration_ms": Int(env["ESCRIBA_VOZ_SILENCIO_MS"] ?? "") ?? 250,
+                                       "create_response": false, "interrupt_response": false]
+            if let e = env["ESCRIBA_VOZ_SEMANTICA"] {
+                turn = ["type": "semantic_vad", "eagerness": e, "create_response": false, "interrupt_response": false]
+            }
+            let s: [String: Any] = [
+                "type": "realtime",
+                "output_modalities": ["audio"],
+                "instructions": """
+                You are a simultaneous interpreter on a live call. Every time the speaker finishes a sentence, say it in \(name).
+                Rules: output ONLY the translation of what was said, nothing else. Keep the same grammatical person the speaker \
+                used: "I" stays "I" and "you" stays "you" (a question addressed to "you" is still addressed to "you"). Keep names, numbers and tone.
+                Never answer questions, never greet, never comment, never explain, never refuse: if the speaker asks a question, \
+                translate the question. If the speaker already talks in \(name), repeat it as is. If you hear nothing intelligible, stay silent.
+                Speak at a brisk, natural pace.
+                """,
+                "audio": ["input": ["format": ["type": "audio/pcm", "rate": 24000], "turn_detection": turn], "output": output],
+            ]
+            // Sin esta confirmación no se manda audio: si OpenAI rechaza los ajustes, el modelo quedaría sin la orden
+            // de traducir y contestaría como asistente.
+            try await withCheckedThrowingContinuation { (c: CheckedContinuation<Void, Error>) in
+                q.async {
+                    self.ready = c
+                    self.send(["type": "session.update", "session": s])
+                }
+                q.asyncAfter(deadline: .now() + 10) { self.failReady(EscribaError.other("OpenAI no confirmó la voz elegida.")) }
+            }
+            return
+        }
         var session: [String: Any] = ["audio": ["output": ["language": language]]]
         if sourceTranscript {
             session = ["audio": ["output": ["language": language], "input": ["transcription": ["model": "gpt-realtime-whisper"]]]]
+        }
+        // Prueba: campos extra para audio.output (JSON), para tantear opciones que la documentación no trae.
+        if let extra = ProcessInfo.processInfo.environment["ESCRIBA_SALIDA_EXTRA"],
+           let e = try? JSONSerialization.jsonObject(with: Data(extra.utf8)) as? [String: Any],
+           var audio = session["audio"] as? [String: Any], var out = audio["output"] as? [String: Any] {
+            for (k, v) in e { out[k] = v }
+            audio["output"] = out; session["audio"] = audio
         }
         send(["type": "session.update", "session": session])
     }
@@ -95,7 +161,7 @@ final class TranslateSocket {
             var v = Int16(max(-1, min(1, s)) * 32767).littleEndian
             withUnsafeBytes(of: &v) { d.append(contentsOf: $0) }
         }
-        send(["type": "session.input_audio_buffer.append", "audio": d.base64EncodedString()])
+        send(["type": agent ? "input_audio_buffer.append" : "session.input_audio_buffer.append", "audio": d.base64EncodedString()])
     }
 
     private func send(_ obj: [String: Any]) {
@@ -131,7 +197,20 @@ final class TranslateSocket {
         case "session.created":
             created = true
             if let r = ready { ready = nil; r.resume() }
-        case "session.output_audio.delta":
+        case "session.updated":
+            if agent, let r = ready { ready = nil; r.resume() }
+        case "input_audio_buffer.committed":
+            // Con voz fija cada frase se traduce por separado y en orden: una respuesta por frase, que solo ve esa frase.
+            // Así no se acumula conversación (ni costo), no se pisan dos respuestas y el modelo no tiene de dónde inventar.
+            if agent, let id = j["item_id"] as? String { items.append(id); nextPhrase() }
+        case "response.done":
+            if agent {
+                if let id = current { send(["type": "conversation.item.delete", "item_id": id]) }
+                current = nil
+                nextPhrase()
+            }
+
+        case "session.output_audio.delta", "response.output_audio.delta":
             guard let b64 = j["delta"] as? String, let d = Data(base64Encoded: b64), d.count >= 2 else { return }
             var out = [Float](repeating: 0, count: d.count / 2)
             d.withUnsafeBytes { raw in
@@ -139,7 +218,7 @@ final class TranslateSocket {
                 for i in 0..<out.count { out[i] = Float(Int16(littleEndian: p[i])) / 32768 }
             }
             onAudio?(out)
-        case "session.output_transcript.delta":
+        case "session.output_transcript.delta", "response.output_audio_transcript.delta":
             if let t = j["delta"] as? String { onText?(t) }
         case "session.input_transcript.delta":
             if let t = j["delta"] as? String { onSource?(t) }
@@ -148,6 +227,10 @@ final class TranslateSocket {
         case "error":
             let e = j["error"] as? [String: Any]
             let msg = (e?["message"] as? String) ?? text
+            if agent, current != nil, !created || ready == nil {   // falló la frase en curso: se sigue con la próxima
+                log("Traducción con voz fija, frase sin traducir: \(msg.prefix(160))")
+                current = nil; nextPhrase(); return
+            }
             log("Traducción, error de OpenAI: \(msg)")
             if ready != nil { failReady(EscribaError.other("OpenAI rechazó la traducción: \(msg.prefix(200))")) }
         default:
@@ -171,6 +254,7 @@ final class TranslateSocket {
                 if self.finished { c.resume(); return }
                 self.closing = true
                 self.closedWaiter = c
+                if self.agent { self.q.asyncAfter(deadline: .now() + 0.2) { self.finish(nil) }; return }
                 self.send(["type": "session.close"])
                 self.q.asyncAfter(deadline: .now() + 3) { self.finish(nil) }
             }
@@ -526,7 +610,7 @@ enum TranslateSim {
         let samples = Mono24Converter().convert(buf) + [Float](repeating: 0, count: Int(kTR * tailSeconds))
         let socket = TranslateSocket()
         let feeder = Feeder(socket: socket)
-        let playout = Playout(speedUp: fast)
+        let playout = Playout(speedUp: fast, cushion: Double(env["ESCRIBA_COLCHON_MS"] ?? "").map { $0 / 1000 } ?? 0.25)
         let meter = LatencyMeter()
         let lock = NSLock()
         var text = ""

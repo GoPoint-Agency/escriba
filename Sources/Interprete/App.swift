@@ -164,6 +164,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
                 m.addItem(i)
             }
         }
+        if Config.apiKey != nil, AudioDevices.virtualMic != nil {
+            // Cuánto oyen los demás tu voz original por debajo de la traducción.
+            let own = NSMenuItem(title: "Mi voz original de fondo (para quien me escucha)", action: nil, keyEquivalent: "")
+            let sub = NSMenu()
+            let current = Config.ownVoiceVolume
+            for (k, p) in AppDelegate.ownVoicePresets.enumerated() {
+                let i = NSMenuItem(title: p.name, action: #selector(setOwnVoiceVolume(_:)), keyEquivalent: "")
+                i.target = self
+                i.tag = k
+                i.state = abs(p.volume - current) < 0.011 ? .on : .off
+                sub.addItem(i)
+            }
+            own.submenu = sub
+            m.addItem(own)
+            // Con qué voz sale la traducción hacia los demás.
+            let vz = NSMenuItem(title: "Voz con que me escuchan", action: nil, keyEquivalent: "")
+            let vsub = NSMenu()
+            for (k, p) in AppDelegate.voiceChoices.enumerated() {
+                let i = NSMenuItem(title: p.name, action: #selector(setVoiceChoice(_:)), keyEquivalent: "")
+                i.target = self
+                i.tag = k
+                i.state = p.key == Config.voiceChoice ? .on : .off
+                vsub.addItem(i)
+            }
+            vz.submenu = vsub
+            vz.toolTip = "Automática: la elige el traductor imitando tu voz, es lo más rápido. Hombre o Mujer: voz fija; la traducción parte cerca de 1,5 segundos más tarde y cuesta más."
+            m.addItem(vz)
+        }
         if translator != nil || Config.apiKey != nil {
             let c = NSMenuItem(title: "Mostrar subtítulos de la traducción", action: #selector(toggleCaptions), keyEquivalent: "")
             c.target = self
@@ -196,6 +224,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, UNUser
     static let originalPresets: [(name: String, idle: Double, ducked: Double)] = [
         ("Apagada", 0, 0), ("Muy baja", 0.05, 0.02), ("Baja (recomendada)", 0.10, 0.04), ("Media", 0.20, 0.08),
     ]
+
+    /// Tu voz original en el micrófono que escuchan los demás.
+    static let ownVoicePresets: [(name: String, volume: Double)] = [
+        ("Apagada", 0), ("Muy baja", 0.05), ("Baja (recomendada)", 0.10), ("Media", 0.20),
+    ]
+
+    static let voiceChoices: [(name: String, key: String)] = [
+        ("Automática (la más rápida)", "auto"), ("Hombre (voz fija)", "hombre"), ("Mujer (voz fija)", "mujer"),
+    ]
+
+    @objc private func setVoiceChoice(_ sender: NSMenuItem) {
+        let p = AppDelegate.voiceChoices[sender.tag]
+        try? Config.update(["voz_traduccion": p.key])
+        if voice != nil { notify("Voz de la traducción", "El cambio se aplica la próxima vez que actives la traducción de tu voz.") }
+    }
+
+    @objc private func setOwnVoiceVolume(_ sender: NSMenuItem) {
+        let p = AppDelegate.ownVoicePresets[sender.tag]
+        try? Config.update(["mi_voz_original": p.volume])
+        voice?.setOwnVoice(p.volume)
+    }
 
     @objc private func setOriginalVolume(_ sender: NSMenuItem) {
         let p = AppDelegate.originalPresets[sender.tag]
