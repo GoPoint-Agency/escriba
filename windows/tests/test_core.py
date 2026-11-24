@@ -205,5 +205,85 @@ class Repeticion(unittest.TestCase):
         self.assertAlmostEqual(played, 0.9, places=3)
 
 
+
+class Reloj:
+    def __init__(self):
+        self.t = 100.0
+
+    def __call__(self):
+        return self.t
+
+
+class SalaDeEquipo(unittest.TestCase):
+    """Lo que emite un compañero de la sala no se traduce de vuelta; lo demás sigue igual."""
+
+    def setUp(self):
+        from interprete import sala
+        self.sala = sala
+        self.reloj = Reloj()
+        self.compas = sala.Compas(clock=self.reloj)
+        self.guard = core.EchoGuard(clock=self.reloj, compas=self.compas)
+        self.audio = np.ones(2400, dtype=np.float32)
+
+    def test_codigo(self):
+        c = self.sala.nuevo_codigo()
+        self.assertEqual(len(c), 8)
+        self.assertEqual(self.sala.limpiar_codigo(" " + self.sala.bonito(c).lower() + " "), c)
+        self.assertEqual(self.sala.limpiar_codigo("abc"), "")
+        self.assertEqual(self.sala.limpiar_codigo(None), "")
+
+    def test_sin_companeros_traduce(self):
+        self.guard.source("We should move the launch to next quarter. ")
+        self.guard.translated("Deberíamos mover el lanzamiento al próximo trimestre. ")
+        self.assertIsNotNone(self.guard.audio(self.audio))
+        self.assertEqual(self.guard.skipped_team, 0)
+
+    def test_companero_hablando_no_se_traduce(self):
+        self.compas.voz(2, True)
+        self.guard.source("We should move the launch to next quarter. ")
+        self.guard.translated("Deberíamos mover el lanzamiento. ")
+        self.assertIsNone(self.guard.audio(self.audio))
+        self.assertTrue(self.guard.same_language)          # el original debe oírse normal
+        self.assertGreater(self.guard.skipped_team, 0)
+
+    def test_cola_despues_de_callar_y_luego_vuelve(self):
+        self.compas.voz(2, True)
+        self.reloj.t += 3
+        self.compas.voz(2, False)
+        self.reloj.t += 0.5
+        self.assertIsNone(self.guard.audio(self.audio))    # la llamada todavía trae su voz
+        self.reloj.t += 6
+        self.guard.source("Thanks, what about the budget for marketing? ")
+        self.guard.translated("Gracias, y el presupuesto de marketing? ")
+        self.assertIsNotNone(self.guard.audio(self.audio)) # ahora habla alguien de verdad en inglés
+
+    def test_aviso_perdido_caduca(self):
+        self.compas.voz(2, True)
+        self.reloj.t += 10                                 # nunca llegó el «callé» ni se renovó
+        self.assertFalse(self.compas.hablando())
+
+    def test_por_el_texto_aunque_ya_callo(self):
+        self.compas.texto(["should", "move", "launch", "next", "quarter"])
+        self.reloj.t += 4                                  # el compañero calló hace rato, el modelo va atrasado
+        self.guard.source("We should move the launch to next quarter. ")
+        self.guard.translated("Deberíamos mover el lanzamiento. ")
+        self.assertIsNone(self.guard.audio(self.audio))
+
+    def test_texto_distinto_si_se_traduce(self):
+        self.compas.texto(["should", "move", "launch", "next", "quarter"])
+        self.reloj.t += 4
+        self.guard.source("Honestly the budget numbers look wrong again. ")
+        self.guard.translated("La verdad, los números del presupuesto. ")
+        self.assertIsNotNone(self.guard.audio(self.audio))
+
+    def test_solo_sala_sin_filtro_de_idioma(self):
+        g = core.EchoGuard(clock=self.reloj, compas=self.compas, same_language=False)
+        g.source("Hola a todos, partamos la reunión ahora. ")
+        g.translated("Hola a todos, partamos la reunión ahora. ")
+        self.reloj.t += 1
+        self.assertIsNotNone(g.audio(self.audio))          # con el filtro apagado, el español se repite como antes
+        self.compas.voz(3, True)
+        self.assertIsNone(g.audio(self.audio))
+
 if __name__ == "__main__":
     unittest.main()

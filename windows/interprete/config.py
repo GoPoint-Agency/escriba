@@ -25,6 +25,7 @@ class Config:
         "mi_voz_original": 0.10,       # cuánto se oye tu voz original por debajo de la traducción
         "volumen_original": 0.10,      # cuánto se oye a los demás por debajo de la traducción
         "no_repetir_mi_idioma": True,  # si alguien ya habla en tu idioma, no se traduce ni se repite
+        "sala_codigo": "",             # sala de equipo: código compartido con los compañeros que usan Intérprete
         "microfono": "",               # parte del nombre; vacío = el del sistema
         "microfono_virtual": "CABLE Input",
     }

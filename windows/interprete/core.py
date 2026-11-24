@@ -242,8 +242,12 @@ class EchoGuard:
     """
     HOLD, PASS, ECHO = "espera", "pasa", "repite"
 
-    def __init__(self, clock=time.monotonic):
+    def __init__(self, clock=time.monotonic, compas=None, same_language=True):
         self._clock = clock
+        self.compas = compas            # sala de equipo: lo que emiten los compañeros no se traduce de vuelta
+        self._same = same_language      # falso = solo se filtra lo de los compañeros
+        self.skipped_team = 0.0         # segundos de traducción de un compañero que no se tradujeron de vuelta
+        self._team_until = -1e9
         self._src = []                  # (momento, palabra) de lo escuchado
         self._src_tail = ""             # palabra de lo escuchado que aún puede seguir creciendo
         self._out = []                  # palabras de lo que dice el modelo en esta intervención
@@ -308,6 +312,9 @@ class EchoGuard:
         if n == 0:
             return
         frac = hits / n
+        if not self._same:                            # el filtro de «ya viene en tu idioma» está apagado
+            self.state = self.PASS
+            return
         if self.state == self.HOLD:
             if hits == 0:
                 self.state = self.PASS                # la primera palabra ya es distinta: es traducción, sin esperar
@@ -320,9 +327,32 @@ class EchoGuard:
 
     # Audio ------------------------------------------------------------------------------------------------
 
+    def from_team(self):
+        """Lo que se está escuchando es la traducción que emite un compañero de la sala."""
+        c = self.compas
+        if c is None:
+            return False
+        now = self._clock()
+        if c.hablando():
+            self._team_until = now + 0.8
+            return True
+        # Por el texto: lo recién escuchado coincide con lo que un compañero avisó que estaba emitiendo. Cubre la
+        # demora de la llamada y del modelo, que siguen entregando esa voz después de que el compañero calló.
+        heard = [w for t, w in self._src if now - t < 6.0 and (len(w) >= 4 or ord(w[0]) >= 0x2E80)][-8:]
+        if len(heard) >= 2:
+            said = c.palabras()
+            if said and sum(1 for w in heard if w in said) / len(heard) >= 0.5:
+                self._team_until = now + 0.8
+                return True
+        return now < self._team_until
+
     def audio(self, samples):
         """Devuelve lo que hay que reproducir (puede ser nada)."""
         now = self._clock()
+        if self.from_team():
+            self.skipped_team += (sum(len(p) for p in self._pending) + len(samples)) / RATE
+            self._pending = []
+            return None
         if self.state == self.HOLD:
             if self._hold_since is None:
                 self._hold_since = now
@@ -343,6 +373,10 @@ class EchoGuard:
     def same_language(self):
         """Cierto mientras quien habla ya lo hace en el idioma de quien escucha: el original debe oírse normal."""
         now = self._clock()
+        if self.compas is not None and self.from_team():
+            return True
+        if not self._same:
+            return False
         if self.state == self.ECHO and now - self._last_out < 2.5:
             return True
         # El modelo a veces ni siquiera repite: se oye hablar hace rato y no dice nada.

@@ -5,12 +5,13 @@ import threading
 import time
 import webbrowser
 
-from . import audio, core
+from . import audio, core, sala as salas
 from .config import Config, carpeta, log
 
-VERSION = "20261123c"
+VERSION = "20261124a"
 VOCES = [("Automática (la más rápida)", "auto"), ("Hombre (voz fija)", "hombre"), ("Mujer (voz fija)", "mujer")]
-NIVELES = [("Apagada", 0.0), ("Muy baja", 0.05), ("Baja (recomendada)", 0.10), ("Media", 0.20)]
+NIVELES = [("Apagada", 0.0), ("Muy baja", 0.05), ("Baja (recomendada)", 0.10), ("Media", 0.20),
+           ("Alta", 0.40), ("Muy alta (reuniones con gente que habla español)", 0.70)]
 CABLE_URL = "https://vb-audio.com/Cable/"
 
 
@@ -172,6 +173,72 @@ class App:
         threading.Thread(target=ui, daemon=True).start()
         done.wait(300)
 
+    # Sala de equipo ------------------------------------------------------------------------------------------
+
+    def _ask(self, texto, inicial=""):
+        """Ventana simple para escribir o copiar un texto. Devuelve lo escrito o None."""
+        out = []
+        done = threading.Event()
+
+        def ui():
+            try:
+                import tkinter as tk
+                from tkinter import simpledialog
+                root = tk.Tk()
+                root.withdraw()
+                root.attributes("-topmost", True)
+                out.append(simpledialog.askstring("Intérprete", texto, initialvalue=inicial, parent=root))
+                root.destroy()
+            except Exception as e:
+                log(f"No pude mostrar la ventana: {e}")
+            done.set()
+        threading.Thread(target=ui, daemon=True).start()
+        done.wait(300)
+        return out[0] if out else None
+
+    def _enter_room(self, codigo):
+        Config.update(sala_codigo=codigo)
+        salas.entrar(codigo, log=log)
+        if self.listen:
+            self.notify("Sala de equipo", "Para que la sala se aplique, detén y vuelve a activar la traducción.")
+        self.refresh()
+
+    def room_create(self, *_):
+        codigo = salas.nuevo_codigo()
+        self._enter_room(codigo)
+        log(f"Sala creada: {salas.bonito(codigo)}")
+        self._ask("Sala creada. Copia este código y pásaselo a tus compañeros que usan Intérprete.\n"
+                  "Ellos lo pegan en «Sala de equipo > Unirme con un código».", salas.bonito(codigo))
+
+    def room_join(self, *_):
+        v = self._ask("Pega el código de sala que te pasó tu compañero:")
+        if v is None:
+            return
+        codigo = salas.limpiar_codigo(v)
+        if not codigo:
+            self.notify("Sala de equipo", "Ese código no es válido. Son 8 letras y números, por ejemplo ABCD-2345.")
+            return
+        self._enter_room(codigo)
+        self.notify("Sala de equipo", f"Entraste a la sala {salas.bonito(codigo)}.")
+
+    def room_show(self, *_):
+        s = salas.actual()
+        if s:
+            self._ask("Código de tu sala, para compartirlo:", salas.bonito(s.codigo))
+
+    def room_leave(self, *_):
+        self._enter_room("")
+        self.notify("Sala de equipo", "Saliste de la sala.")
+
+    def _room_title(self, _=None):
+        s = salas.actual()
+        if not s:
+            return "Sala de equipo"
+        if not s.conectada:
+            return f"Sala de equipo: {salas.bonito(s.codigo)} (conectando…)"
+        n = s.compas.conectados
+        return f"Sala de equipo: {salas.bonito(s.codigo)} ({n} conectado{'s' if n != 1 else ''})"
+
     def open_log(self, *_):
         p = os.path.join(carpeta(), "interprete.log")
         if sys.platform == "win32":
@@ -208,6 +275,16 @@ class App:
                              checked=choice("mi_voz_original", v), radio=True) for n, v in NIVELES])
         original = Menu(*[Item(n, set_cfg("volumen_original", v, lambda x: self.listen and self.listen.set_original_volume(x)),
                                checked=choice("volumen_original", v), radio=True) for n, v in NIVELES])
+        en = lambda _: salas.actual() is not None          # noqa: E731
+        fuera = lambda _: salas.actual() is None           # noqa: E731
+        hilo = lambda f: (lambda *_: threading.Thread(target=f, daemon=True).start())   # noqa: E731
+        sala = Menu(
+            Item("Crear una sala y copiar el código…", hilo(self.room_create), visible=fuera),
+            Item("Unirme con un código…", hilo(self.room_join), visible=fuera),
+            Item("Ver el código de mi sala…", hilo(self.room_show), visible=en),
+            Item("Salir de la sala", self.room_leave, visible=en),
+            Item("Para reuniones donde varios usan Intérprete", None, enabled=False),
+        )
         return Menu(
             Item(lambda _: "Detener el modo intérprete" if (self.listen and self.voice) else "Modo intérprete: traducir en los dos sentidos",
                  self.toggle_both, default=True),
@@ -221,6 +298,7 @@ class App:
             Item("Volumen de la llamada original (para mí)", original),
             Item("No repetir lo que ya viene en español", self.toggle_echo,
                  checked=lambda _: bool(Config.get("no_repetir_mi_idioma"))),
+            Item(self._room_title, sala),
             Menu.SEPARATOR,
             Item("Instalar el micrófono virtual (VB-CABLE)…", self.install_cable, visible=lambda _: audio.virtual_mic() is None),
             Item(lambda _: "Clave de OpenAI…" if Config.api_key() else "Poner la clave de OpenAI…",
@@ -245,6 +323,10 @@ class App:
                 log(f"Volumen: {e}")
         log(f"Intérprete {VERSION} iniciado (clave={'sí' if Config.api_key() else 'no'}, "
             f"micrófono virtual={'sí' if audio.virtual_mic() else 'no'}, captura por app={'sí' if audio.helper_path() else 'no'})")
+        salas.al_cambiar = self.refresh
+        codigo = salas.limpiar_codigo(Config.get("sala_codigo"))
+        if codigo:
+            salas.entrar(codigo, log=log)
         self.icon = pystray.Icon("Interprete", self.image(), "Intérprete: en espera", self.menu())
         self.icon.run(setup=self._ready)
 

@@ -16,7 +16,7 @@ import warnings
 
 import numpy as np
 
-from . import core
+from . import core, sala as salas
 from .config import Config, log
 
 warnings.filterwarnings("ignore", message="data discontinuity")
@@ -172,6 +172,8 @@ class _Session:
         self._cleanup()
         if getattr(self, "guard", None):
             log(f"{self.name}: {self.guard.skipped:.0f} s de voz que ya venía en tu idioma no se repitieron")
+            if self.guard.compas is not None:
+                log(f"{self.name}: {self.guard.skipped_team:.0f} s de traducción de compañeros de la sala no se tradujeron de vuelta")
         extra = f", ganancia de salida x{self.out_agc.gain:.1f}" if getattr(self, "out_agc", None) else ""
         if getattr(self, "mic_agc", None):
             extra += f", ganancia del micrófono x{self.mic_agc.gain:.1f}"
@@ -211,6 +213,17 @@ class VoiceOut(_Session):
         log(f"{self.name} activa ({Config.get('mi_voz_a')}): {self.mic_name} -> {out.name}; voz {choice}; "
             f"mi voz original de fondo al {int(v * 100)} %")
 
+    def _text(self, t):
+        super()._text(t)
+        sala = salas.actual()
+        if sala:
+            sala.dije(t)
+
+    def _cleanup(self):
+        sala = salas.actual()
+        if sala:
+            sala.emitiendo(False)
+
     def set_own_voice(self, v):
         self.own_gain.idle, self.own_gain.ducked = v, v * 0.5
 
@@ -247,6 +260,9 @@ class VoiceOut(_Session):
                 block = self.ring.read(BLOCK)
                 # Encima de la traducción va tu voz original, bajita.
                 block = block + self.own_gain.apply(self.own.read(BLOCK), self.ring.speaking)
+                sala = salas.actual()
+                if sala:
+                    sala.emitiendo(self.ring.speaking)
                 p.play(np.clip(block, -1, 1))
 
 
@@ -261,7 +277,9 @@ class Listen(_Session):
             raise core.TranslateError("No encontré tus audífonos o parlantes.")
         self.spk = spk
         # Si alguien ya habla en tu idioma, no se repite: esa voz se deja pasar tal cual.
-        self.guard = core.EchoGuard() if Config.get("no_repetir_mi_idioma") else None
+        sala = salas.actual()
+        same = bool(Config.get("no_repetir_mi_idioma"))
+        self.guard = core.EchoGuard(compas=sala.compas if sala else None, same_language=same) if (same or sala) else None
         self._open_socket(Config.get("traducir_a"), guard=self.guard)
         self.agc = core.Agc()
         self.chunker = core.Chunker(self.socket.append)

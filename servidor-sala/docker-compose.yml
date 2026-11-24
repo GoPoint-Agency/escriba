@@ -1,0 +1,12 @@
+services:
+  sala:
+    build: .
+    container_name: interprete-sala
+    restart: unless-stopped
+    mem_limit: 128m
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.interpretesala.rule=Host(`sala.31-97-248-157.sslip.io`)
+      - traefik.http.routers.interpretesala.entrypoints=websecure
+      - traefik.http.routers.interpretesala.tls.certresolver=letsencrypt
+      - traefik.http.services.interpretesala.loadbalancer.server.port=8080
